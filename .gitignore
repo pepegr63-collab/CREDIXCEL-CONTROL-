@@ -1,0 +1,7 @@
+.gradle/
+build/
+local.properties
+server/node_modules/
+server/credixcel.db
+*.iml
+.idea/
