@@ -28,7 +28,7 @@ jobs:
 
       - name: Extraer proyecto Android
         run: |
-          unzip -o CREDIXCEL-Control-v1-DeviceOwner-FRP-fixed2.zip -d buildsrc
+          unzip -o CREDIXCEL-Control-v1-DeviceOwner-FRP-fixed3.zip -d buildsrc
           test -f buildsrc/CREDIXCEL-Control/settings.gradle.kts
 
       - name: Compilar APK
