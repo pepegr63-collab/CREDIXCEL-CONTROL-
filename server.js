@@ -26,7 +26,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'CHANGE_ME_IN_PRODUCTION';
 const audit = (action, entity, entityId, details='') => db.prepare('INSERT INTO audit(id,action,entity,entity_id,details,created_at) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), action, entity, entityId, details, now());
 function admin(req,res,next){ const h=req.headers.authorization||''; try { jwt.verify(h.replace('Bearer ',''), ADMIN_SECRET); next(); } catch { res.status(401).json({error:'Unauthorized'}); } }
 
-app.use(express.static(path.join(__dirname,'../public')));
+app.use(express.static(path.join(__dirname,'public')));
 app.get('/health',(req,res)=>res.json({ok:true,service:'CREDIXCEL Control'}));
 app.post('/api/admin/login',(req,res)=>{ if(req.body.username!=='admin'||req.body.password!==ADMIN_PASSWORD) return res.status(401).json({error:'Invalid credentials'}); res.json({token:jwt.sign({role:'admin'},ADMIN_SECRET,{expiresIn:'8h'})}); });
 
