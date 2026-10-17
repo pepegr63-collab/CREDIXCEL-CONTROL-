@@ -1,1 +1,167 @@
 
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CREDIXCEL Control | Administración</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#f1f5f9;color:#172554;margin:0}
+    header{background:#102b55;color:white;padding:20px}
+    main{max-width:950px;margin:25px auto;padding:16px}
+    section{background:white;padding:20px;margin-bottom:18px;border-radius:12px;box-shadow:0 2px 8px #0001}
+    input,button{padding:11px;margin:5px 0;max-width:100%;box-sizing:border-box}
+    input{border:1px solid #cbd5e1;border-radius:6px}
+    button{background:#087f5b;color:white;border:0;border-radius:6px;cursor:pointer}
+    .hidden{display:none}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+    .metric{background:#eaf2ff;padding:15px;border-radius:8px}
+    pre{white-space:pre-wrap;overflow-wrap:anywhere}
+    .error{color:#b91c1c}
+  </style>
+</head>
+<body>
+<header>
+  <h1>CREDIXCEL</h1>
+  <p>Panel de administración de equipos financiados</p>
+</header>
+<main>
+  <section id="login">
+    <h2>Iniciar sesión</h2>
+    <p>Introduce las credenciales configuradas en el servidor.</p>
+    <input id="username" placeholder="Usuario" autocomplete="username"><br>
+    <input id="password" type="password" placeholder="Contraseña" autocomplete="current-password"><br>
+    <button onclick="login()">Entrar</button>
+    <p id="loginMsg" role="status"></p>
+  </section>
+
+  <div id="panel" class="hidden">
+    <section>
+      <h2>Resumen</h2>
+      <div id="metrics" class="grid">Cargando...</div>
+      <button onclick="loadDashboard()">Actualizar resumen</button>
+      <button onclick="logout()">Cerrar sesión</button>
+    </section>
+
+    <section>
+      <h2>Registrar equipo</h2>
+      <button onclick="createDevice()">Generar código de enrolamiento</button>
+      <pre id="newDevice"></pre>
+    </section>
+
+    <section>
+      <h2>Equipos</h2>
+      <button onclick="loadDevices()">Actualizar equipos</button>
+      <div id="devices"></div>
+    </section>
+
+    <section>
+      <h2>Clientes</h2>
+      <button onclick="loadClients()">Consultar clientes</button>
+      <pre id="clients"></pre>
+    </section>
+  </div>
+</main>
+<script>
+let token = '';
+async function api(url, options={}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type':'application/json',
+      ...(token ? {'Authorization':'Bearer '+token} : {}),
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Error del servidor');
+  return data;
+}
+async function login() {
+  const msg = document.getElementById('loginMsg');
+  msg.textContent = 'Verificando...';
+  try {
+    const result = await api('/api/admin/login', {
+      method:'POST',
+      body:JSON.stringify({
+        username:document.getElementById('username').value,
+        password:document.getElementById('password').value
+      })
+    });
+    token = result.token;
+    document.getElementById('password').value = '';
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('panel').classList.remove('hidden');
+    msg.textContent = '';
+    await loadDashboard();
+    await loadDevices();
+  } catch(e) { msg.textContent = e.message; msg.className = 'error'; }
+}
+async function loadDashboard() {
+  try {
+    const d = await api('/api/admin/dashboard');
+    document.getElementById('metrics').innerHTML =
+      [['Clientes',d.clients],['Equipos',d.devices],['Activos',d.active],
+       ['Pago pendiente',d.due],['Bloqueados',d.locked],
+       ['Saldo pendiente',Number(d.pending).toFixed(2)]]
+      .map(([name,value])=>`<div class="metric"><b>${name}</b><h2>${value}</h2></div>`).join('');
+  } catch(e) { alert(e.message); }
+}
+async function createDevice() {
+  try {
+    const d = await api('/api/admin/devices',{method:'POST',body:'{}'});
+    document.getElementById('newDevice').textContent =
+      'ID: '+d.id+'\nCódigo de enrolamiento: '+d.enrollmentCode;
+    await loadDevices();
+  } catch(e) { alert(e.message); }
+}
+async function loadDevices() {
+  try {
+    const list = await api('/api/admin/devices');
+    const root = document.getElementById('devices');
+    root.replaceChildren();
+    if (!list.length) { root.textContent = 'Todavía no hay equipos.'; return; }
+    list.forEach(d => {
+      const card = document.createElement('section');
+      const title = document.createElement('h3');
+      title.textContent = d.device_name || 'Equipo sin enrolar';
+      const info = document.createElement('p');
+      info.textContent = `Estado: ${d.status} · Cliente: ${d.client_name || 'Sin asignar'} · Código: ${d.enrollment_code}`;
+      const select = document.createElement('select');
+      [['ACTIVE','Activo'],['PAYMENT_DUE','Pago pendiente'],['LOCKED','Bloqueado']].forEach(([v,l])=>{
+        const o = document.createElement('option'); o.value=v; o.textContent=l; o.selected=d.status===v; select.append(o);
+      });
+      const message = document.createElement('input');
+      message.placeholder = 'Mensaje para el equipo';
+      message.value = d.message || '';
+      const save = document.createElement('button');
+      save.textContent = 'Guardar estado';
+      save.onclick = async () => {
+        try {
+          await api('/api/admin/devices/'+encodeURIComponent(d.id)+'/state',{
+            method:'POST',body:JSON.stringify({status:select.value,message:message.value})
+          });
+          alert('Estado actualizado.');
+          await loadDevices();
+        } catch(e) { alert(e.message); }
+      };
+      card.append(title,info,select,document.createElement('br'),message,document.createElement('br'),save);
+      root.append(card);
+    });
+  } catch(e) { alert(e.message); }
+}
+async function loadClients() {
+  try {
+    document.getElementById('clients').textContent =
+      JSON.stringify(await api('/api/admin/clients'),null,2);
+  } catch(e) { alert(e.message); }
+}
+function logout() {
+  token = '';
+  document.getElementById('panel').classList.add('hidden');
+  document.getElementById('login').classList.remove('hidden');
+}
+</script>
+</body>
+</html>
+
