@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/android.yml"
-      - "CREDIXCEL-Control-v1-DeviceOwner-FRP.zip"
+      - "CREDIXCEL-Control-v1-DeviceOwner-FRP-fixed3.zip"
 
 jobs:
   build:
@@ -20,6 +20,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Instalar herramientas Android
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "build-tools;35.0.0"
 
       - name: Preparar Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -36,9 +41,27 @@ jobs:
           cd buildsrc/CREDIXCEL-Control
           gradle :android:app:assembleDebug --no-daemon
 
-      - name: Guardar APK
+      - name: Verificar APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find buildsrc/CREDIXCEL-Control/android/app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)"
+          test -n "$APK"
+          echo "APK generado: $APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          APKANALYZER="$(find "$ANDROID_HOME" -type f -name apkanalyzer -print -quit)"
+          test -n "$APKANALYZER"
+          "$APKANALYZER" manifest print "$APK" > manifest.txt
+          echo "=== Componentes de administración ==="
+          grep -E 'GetProvisioningModeActivity|AdminPolicyComplianceActivity|CredixcelDeviceAdminReceiver|GET_PROVISIONING_MODE|ADMIN_POLICY_COMPLIANCE|DEVICE_ADMIN_ENABLED|BIND_DEVICE_ADMIN' manifest.txt || true
+          echo "=== Manifiesto completo ==="
+          cat manifest.txt
+
+      - name: Guardar APK y manifiesto
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-debug
-          path: buildsrc/CREDIXCEL-Control/android/app/build/outputs/apk/debug/*.apk
+          name: CREDIXCEL-Control-inspeccion
+          path: |
+            buildsrc/CREDIXCEL-Control/android/app/build/outputs/apk/debug/*.apk
+            manifest.txt
           if-no-files-found: error
