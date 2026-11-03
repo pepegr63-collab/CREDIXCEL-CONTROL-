@@ -10,11 +10,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-env:
+    env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -36,6 +37,9 @@ env:
           gradle-version: "8.9"
 
       - name: Extraer proyecto Android
+        run: |
+          unzip -o CREDIXCEL-Control-v1-DeviceOwner-FRP-fixed4-firmado.zip -d buildsrc
+
       - name: Preparar firma
         shell: bash
         run: |
@@ -44,8 +48,6 @@ env:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
           test -s "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/credixcel-signing/credixcel-release.jks" >> "$GITHUB_ENV"
-        run: |
-          unzip -o CREDIXCEL-Control-v1-DeviceOwner-FRP-fixed4-firmado.zip -d buildsrc
 
       - name: Compilar APK
         run: |
@@ -56,23 +58,21 @@ env:
         shell: bash
         run: |
           set -euo pipefail
-          APK="$(find buildsrc/CREDIXCEL-Control/android/app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)"
+          APK="$(find buildsrc/CREDIXCEL-Control/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
           test -n "$APK"
           echo "APK generado: $APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           APKANALYZER="$(find "$ANDROID_HOME" -type f -name apkanalyzer -print -quit)"
           test -n "$APKANALYZER"
           "$APKANALYZER" manifest print "$APK" > manifest.txt
-          echo "=== Componentes de administración ==="
-          grep -E 'GetProvisioningModeActivity|AdminPolicyComplianceActivity|CredixcelDeviceAdminReceiver|GET_PROVISIONING_MODE|ADMIN_POLICY_COMPLIANCE|DEVICE_ADMIN_ENABLED|BIND_DEVICE_ADMIN' manifest.txt || true
-          echo "=== Manifiesto completo ==="
+          echo "=== Manifiesto ==="
           cat manifest.txt
 
       - name: Guardar APK y manifiesto
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-inspeccion
+          name: CREDIXCEL-Control-Release
           path: |
-            buildsrc/CREDIXCEL-Control/android/app/build/outputs/apk/debug/*.apk
+            buildsrc/CREDIXCEL-Control/android/app/build/outputs/apk/release/*.apk
             manifest.txt
           if-no-files-found: error
