@@ -10,7 +10,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -32,13 +36,21 @@ jobs:
           gradle-version: "8.9"
 
       - name: Extraer proyecto Android
+      - name: Preparar firma
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/credixcel-signing"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
+          test -s "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/credixcel-signing/credixcel-release.jks" >> "$GITHUB_ENV"
         run: |
           unzip -o CREDIXCEL-Control-v1-DeviceOwner-FRP-fixed4-firmado.zip -d buildsrc
 
       - name: Compilar APK
         run: |
           cd buildsrc/CREDIXCEL-Control
-          gradle :android:app:assembleDebug --no-daemon
+          gradle :android:app:assembleRelease --no-daemon
 
       - name: Verificar APK
         shell: bash
