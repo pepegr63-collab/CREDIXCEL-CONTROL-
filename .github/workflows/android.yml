@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/android.yml"
-      - "CREDIXCEL-Control-v1-DeviceOwner-FRP-fixed4-firmado.zip"
+      - "CREDIXCEL-Control-fixed5-sin-bloqueos.zip"
 
 jobs:
   build:
@@ -38,7 +38,7 @@ jobs:
 
       - name: Extraer proyecto Android
         run: |
-          unzip -o CREDIXCEL-Control-v1-DeviceOwner-FRP-fixed4-firmado.zip -d buildsrc
+          unzip -o CREDIXCEL-Control-fixed5-sin-bloqueos.zip -d buildsrc
 
       - name: Preparar firma
         shell: bash
