@@ -120,41 +120,128 @@ async function loadDevices() {
     const list = await api('/api/admin/devices');
     const root = document.getElementById('devices');
     root.replaceChildren();
-    if (!list.length) { root.textContent = 'Todavía no hay equipos.'; return; }
+
+    if (!list.length) {
+      root.textContent = 'Todavía no hay equipos.';
+      return;
+    }
+
     list.forEach(d => {
       const card = document.createElement('section');
+
       const title = document.createElement('h3');
       title.textContent = d.device_name || 'Equipo sin enrolar';
+
       const info = document.createElement('p');
       info.textContent = `Estado: ${d.status} · Cliente: ${d.client_name || 'Sin asignar'} · Código: ${d.enrollment_code}`;
+
+      const imeiTitle = document.createElement('h4');
+      imeiTitle.textContent = 'Identificadores IMEI';
+
+      const imeiNote = document.createElement('p');
+      imeiNote.textContent = 'Captura manual. Android 15 puede impedir la lectura automática.';
+
+      const imei1Label = document.createElement('label');
+      imei1Label.textContent = 'IMEI 1';
+
+      const imei1 = document.createElement('input');
+      imei1.type = 'text';
+      imei1.inputMode = 'numeric';
+      imei1.maxLength = 15;
+      imei1.placeholder = '15 dígitos';
+      imei1.value = d.imei_1 || '';
+
+      const imei2Label = document.createElement('label');
+      imei2Label.textContent = 'IMEI 2';
+
+      const imei2 = document.createElement('input');
+      imei2.type = 'text';
+      imei2.inputMode = 'numeric';
+      imei2.maxLength = 15;
+      imei2.placeholder = '15 dígitos';
+      imei2.value = d.imei_2 || '';
+
+      const saveImei = document.createElement('button');
+      saveImei.textContent = 'Guardar IMEI';
+
+      saveImei.onclick = async () => {
+        try {
+          await api('/api/admin/devices/' + encodeURIComponent(d.id) + '/imei', {
+            method: 'PUT',
+            body: JSON.stringify({
+              imei1: imei1.value,
+              imei2: imei2.value
+            })
+          });
+
+          alert('IMEI guardados correctamente.');
+          await loadDevices();
+        } catch(e) {
+          alert(e.message);
+        }
+      };
+
       const select = document.createElement('select');
-      [['ACTIVE','Activo'],['PAYMENT_DUE','Pago pendiente'],['LOCKED','Bloqueado']].forEach(([v,l])=>{
-        const o = document.createElement('option'); o.value=v; o.textContent=l; o.selected=d.status===v; select.append(o);
+
+      [['ACTIVE','Activo'],['PAYMENT_DUE','Pago pendiente'],['LOCKED','Bloqueado']].forEach(([v,l]) => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = l;
+        o.selected = d.status === v;
+        select.append(o);
       });
+
       const message = document.createElement('input');
       message.placeholder = 'Mensaje para el equipo';
       message.value = d.message || '';
+
       const save = document.createElement('button');
       save.textContent = 'Guardar estado';
+
       save.onclick = async () => {
         try {
-          await api('/api/admin/devices/'+encodeURIComponent(d.id)+'/state',{
-            method:'POST',body:JSON.stringify({status:select.value,message:message.value})
+          await api('/api/admin/devices/' + encodeURIComponent(d.id) + '/state', {
+            method: 'POST',
+            body: JSON.stringify({
+              status: select.value,
+              message: message.value
+            })
           });
+
           alert('Estado actualizado.');
           await loadDevices();
-        } catch(e) { alert(e.message); }
+        } catch(e) {
+          alert(e.message);
+        }
       };
-      card.append(title,info,select,document.createElement('br'),message,document.createElement('br'),save);
+
+      card.append(
+        title,
+        info,
+        imeiTitle,
+        imeiNote,
+        imei1Label,
+        document.createElement('br'),
+        imei1,
+        document.createElement('br'),
+        imei2Label,
+        document.createElement('br'),
+        imei2,
+        document.createElement('br'),
+        saveImei,
+        document.createElement('hr'),
+        select,
+        document.createElement('br'),
+        message,
+        document.createElement('br'),
+        save
+      );
+
       root.append(card);
     });
-  } catch(e) { alert(e.message); }
-}
-async function loadClients() {
-  try {
-    document.getElementById('clients').textContent =
-      JSON.stringify(await api('/api/admin/clients'),null,2);
-  } catch(e) { alert(e.message); }
+  } catch(e) {
+    alert(e.message);
+  }
 }
 function logout() {
   token = '';
