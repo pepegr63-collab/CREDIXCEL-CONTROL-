@@ -24,7 +24,28 @@ const pool = new Pool({
 
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
+function normalizeImei(value) {
+  return String(value || '').replace(/[\s-]/g, '');
+}
 
+function validImei(value) {
+  if (!/^\d{15}$/.test(value)) return false;
+
+  let sum = 0;
+
+  for (let i = 0; i < 15; i++) {
+    let digit = Number(value[i]);
+
+    if (i % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+
+    sum += digit;
+  }
+
+  return sum % 10 === 0;
+}
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS clients (
@@ -162,7 +183,55 @@ app.post('/api/admin/devices', admin, async (req, res, next) => {
     res.json({ id: deviceId, enrollmentCode: code });
   } catch (e) { next(e); }
 });
+app.put('/api/admin/devices/:id/imei', admin, async (req, res, next) => {
+  try {
+    const imei1 = normalizeImei(req.body.imei1);
+    const imei2 = normalizeImei(req.body.imei2);
 
+    if ((imei1 && !validImei(imei1)) || (imei2 && !validImei(imei2))) {
+      return res.status(400).json({ error: 'Cada IMEI debe tener 15 dígitos válidos.' });
+    }
+
+    if (imei1 && imei2 && imei1 === imei2) {
+      return res.status(400).json({ error: 'IMEI 1 e IMEI 2 deben ser diferentes.' });
+    }
+
+    const exists = await pool.query(
+      `SELECT id FROM devices
+       WHERE id <> $1 AND (
+         ($2 <> '' AND (imei_1 = $2 OR imei_2 = $2))
+         OR ($3 <> '' AND (imei_1 = $3 OR imei_2 = $3))
+       ) LIMIT 1`,
+      [req.params.id, imei1, imei2]
+    );
+
+    if (exists.rowCount) {
+      return res.status(409).json({ error: 'Ese IMEI ya está registrado en otro equipo.' });
+    }
+
+    const result = await pool.query(
+      `UPDATE devices
+       SET imei_1 = $1, imei_2 = $2,
+           imei_source = 'manual',
+           imei_updated_at = $3,
+           updated_at = $3
+       WHERE id = $4`,
+      [imei1 || null, imei2 || null, now(), req.params.id]
+    );
+
+    if (!result.rowCount) {
+      return res.status(404).json({ error: 'Equipo no encontrado.' });
+    }
+
+    await audit('DEVICE_IMEI_UPDATED', 'device', req.params.id, 'IMEI actualizado');
+    res.json({ updated: result.rowCount });
+  } catch (e) {
+    if (e.code === '23505') {
+      return res.status(409).json({ error: 'Ese IMEI ya está registrado.' });
+    }
+    next(e);
+  }
+});
 app.post('/api/admin/devices/:id/state', admin, async (req, res, next) => {
   try {
     const { status, message = '' } = req.body;
