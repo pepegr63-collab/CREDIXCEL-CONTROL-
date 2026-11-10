@@ -254,6 +254,13 @@ initDb()
   .then(() => app.listen(port, () => console.log(`CREDIXCEL Control API running on :${port}`)))
   .catch(err => {
     console.error('Database initialization failed:', err.message);
-    process.exit(1);
+    process.exit(1);await pool.query(`
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS imei_1 TEXT;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS imei_2 TEXT;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS imei_source TEXT DEFAULT 'manual';
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS imei_updated_at TEXT;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS devices_imei_1_unique
+    ON devices(imei_1) WHERE imei_1 IS NOT NULL AND imei_1 DIL0
   });
 
