@@ -102,15 +102,25 @@ app.post('/api/device/sync', async (req, res, next) => {
   try {
     const { deviceId, deviceToken } = req.body || {};
     const result = await pool.query(
-      `SELECT d.*, c.status AS contract_status
-       FROM devices d LEFT JOIN contracts c ON c.device_id=d.id
+      `SELECT d.*, contract.status AS contract_status
+       FROM devices d
+       LEFT JOIN LATERAL (
+         SELECT status
+         FROM contracts
+         WHERE device_id = d.id
+         ORDER BY created_at DESC NULLS LAST
+         LIMIT 1
+       ) contract ON TRUE
        WHERE d.id=$1 AND d.device_token=$2`,
       [deviceId, deviceToken]
     );
     const row = result.rows[0];
     if (!row) return res.status(401).json({ error: 'Unauthorized device' });
     await pool.query('UPDATE devices SET updated_at=$1 WHERE id=$2', [now(), deviceId]);
-    res.json({ deviceId: row.id, status: row.status, message: row.message || '', uninstallBlocked: Boolean(row.uninstall_blocked), contractStatus: row.contract_status || 'ACTIVE', updatedAt: row.updated_at });
+    // Fail closed: a missing linked contract is never reported as ACTIVE.
+    // The Android app may request lockNow() only for LOCKED + ACTIVE.
+    const contractStatus = row.contract_status || 'NO_CONTRACT';
+    res.json({ deviceId: row.id, status: row.status, message: row.message || '', uninstallBlocked: Boolean(row.uninstall_blocked), contractStatus, updatedAt: row.updated_at });
   } catch (e) { next(e); }
 });
 
