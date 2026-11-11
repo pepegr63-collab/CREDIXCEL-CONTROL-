@@ -60,6 +60,19 @@ jobs:
           echo "Proyecto Android encontrado: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+      - name: Publicar código fuente extraído para revisión
+        uses: actions/upload-artifact@v4
+        with:
+          name: CREDIXCEL-Control-Fuente-Revision
+          path: |
+            buildsrc/**/CREDIXCEL-Control/android/app/src/**
+            buildsrc/**/CREDIXCEL-Control/android/app/build.gradle*
+            buildsrc/**/CREDIXCEL-Control/build.gradle*
+            buildsrc/**/CREDIXCEL-Control/settings.gradle*
+            buildsrc/**/CREDIXCEL-Control/gradle.properties
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Corregir versión de Android
         shell: bash
         run: |
