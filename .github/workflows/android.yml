@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/android.yml"
-      - "CREDIXCEL-Control-fixed9-sin-bloqueos.zip"
+      - "CREDIXCEL-Control-fixed9-sin-bloqueos*.zip"
 
 jobs:
   build:
@@ -48,12 +48,23 @@ jobs:
           fi
           echo "ZIP encontrado: $ZIP"
           unzip -o "$ZIP" -d buildsrc
+          PROJECT_DIR="$(find buildsrc -type f -path '*/CREDIXCEL-Control/android/app/build.gradle.kts' -print -quit | sed 's#/android/app/build.gradle.kts##')"
+          if [ -z "$PROJECT_DIR" ]; then
+            PROJECT_DIR="$(find buildsrc -type f -path '*/CREDIXCEL-Control/android/app/build.gradle' -print -quit | sed 's#/android/app/build.gradle##')"
+          fi
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "No se encontró el proyecto Android dentro del ZIP."
+            find buildsrc -maxdepth 8 -type f \( -name build.gradle -o -name build.gradle.kts \)
+            exit 1
+          fi
+          echo "Proyecto Android encontrado: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Corregir versión de Android
         shell: bash
         run: |
           set -euo pipefail
-          APP_DIR="buildsrc/CREDIXCEL-Control-fixed9-sin-bloqueos/CREDIXCEL-Control/android/app"
+          APP_DIR="$PROJECT_DIR/android/app"
           BUILD_FILE=""
           for candidate in "$APP_DIR/build.gradle.kts" "$APP_DIR/build.gradle"; do
             if [ -f "$candidate" ]; then BUILD_FILE="$candidate"; break; fi
@@ -92,14 +103,14 @@ jobs:
 
       - name: Compilar APK
         run: |
-          cd buildsrc/CREDIXCEL-Control-fixed9-sin-bloqueos/CREDIXCEL-Control
+          cd "$PROJECT_DIR"
           gradle :android:app:assembleRelease --no-daemon
 
       - name: Verificar APK
         shell: bash
         run: |
           set -euo pipefail
-          APK="$(find buildsrc/CREDIXCEL-Control-fixed9-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+          APK="$(find "$PROJECT_DIR/android/app/build/outputs/apk/release" -maxdepth 1 -name '*.apk' -print -quit)"
           test -n "$APK"
           echo "APK generado: $APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
@@ -114,6 +125,6 @@ jobs:
         with:
           name: CREDIXCEL-Control-Release
           path: |
-            buildsrc/CREDIXCEL-Control-fixed9-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release/*.apk
+            buildsrc/**/CREDIXCEL-Control/android/app/build/outputs/apk/release/*.apk
             manifest.txt
           if-no-files-found: error
