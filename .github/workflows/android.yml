@@ -110,19 +110,19 @@ jobs:
               }
 
               """
-              if not re.search(r"^\\s*fun lock\\(context: Context\\)", d, re.M):
+              if not re.search(r"^\s*fun lock\(context: Context\)", d, re.M):
                   raise SystemExit("No se encontró función lock en DeviceActions.kt")
-              d = re.sub(r"(?=^\\s*fun lock\\(context: Context\\))", method, d, count=1, flags=re.M)
+              d = re.sub(r"(?=^\s*fun lock\(context: Context\))", method, d, count=1, flags=re.M)
 
           if "var isRestricted by remember" not in m:
-              m, n = re.subn(r"(        var busy by remember \\{\\n            mutableStateOf\\(false\\)\\n        \\})",
-                             r"\\1\\n\\n        var isRestricted by remember { mutableStateOf(false) }", m, count=1)
+              m, n = re.subn(r"(        var busy by remember \{\n            mutableStateOf\(false\)\n        \})",
+                             r"\1\n\n        var isRestricted by remember { mutableStateOf(false) }", m, count=1)
               if n != 1: raise SystemExit("No se encontró estado busy en MainActivity.kt")
 
           if "DISPOSITIVO RESTRINGIDO" not in m:
               # Envuelve la pantalla principal en una rama restringida, sin depender de offsets de espacios.
-              column = r"(                Column\\(\\n                    Modifier\\n                        \\.fillMaxSize\\(\\)\\n                        \\.padding\\(20\\.dp\\),\\n                    verticalArrangement = Arrangement\\.spacedBy\\(10\\.dp\\)\\n                \\) \\{)"
-              restricted = r'''\\1
+              column = r"(                Column\(\n                    Modifier\n                        \.fillMaxSize\(\)\n                        \.padding\(20\.dp\),\n                    verticalArrangement = Arrangement\.spacedBy\(10\.dp\)\n                \) \{)"
+              restricted = r'''\1
                       if (isRestricted) {
                           Text("CREDIXCEL Control", style = MaterialTheme.typography.headlineMedium)
                           Text("DISPOSITIVO RESTRINGIDO", style = MaterialTheme.typography.headlineSmall)
@@ -147,7 +147,7 @@ jobs:
                                           info = "El servidor aún no confirma ACTIVE. La restricción continúa."
                                       }
                                   } catch (e: Exception) {
-                                      info = "No se pudo consultar el servidor; se mantiene la restricción: \${e.localizedMessage ?: e.javaClass.simpleName}"
+                                      info = "No se pudo consultar el servidor; se mantiene la restricción: ${e.localizedMessage ?: e.javaClass.simpleName}"
                                   } finally { busy = false }
                               }
                           }, modifier = Modifier.fillMaxWidth()) {
@@ -157,12 +157,12 @@ jobs:
               m, n = re.subn(column, restricted, m, count=1)
               if n != 1: raise SystemExit("No se encontró la apertura de Column en MainActivity.kt")
               # Cierra el else justo antes del cierre de Column.
-              m, n = re.subn(r"(                    Text\\(\\n                        \"La sincronización consulta el estado del servidor\.[^\\n]*\\n                        style = MaterialTheme\\.typography\\.bodySmall\\n                    \\)\\n)(                \\})",
-                             r"\\1                    }\\n\\2", m, count=1)
+              m, n = re.subn(r"(                    Text\(\n                        \"La sincronización consulta el estado del servidor\.[^\n]*\n                        style = MaterialTheme\.typography\.bodySmall\n                    \)\n)(                \})",
+                             r"\1                    }\n\2", m, count=1)
               if n != 1: raise SystemExit("No se encontró el cierre de la pantalla principal")
 
           # Sustituye el when completo para evitar depender de la indentación del ZIP.
-          pattern = r"                                    info = when \\{.*?\\n                                    \\}"
+          pattern = r"                                    info = when \{.*?\n                                    \}"
           replacement = '''                                    info = when {
                                         state.status.equals("LOCKED", true) &&
                                             state.contractStatus.equals("ACTIVE", true) -> {
@@ -185,7 +185,7 @@ jobs:
                                         state.status.equals("LOCKED", true) ->
                                             "LOCKED recibido, pero el contrato no está ACTIVE. No se modificó la restricción."
                                         else ->
-                                            "Estado recibido: \${state.status} / contrato \${state.contractStatus}. No se modificó la restricción."
+                                            "Estado recibido: ${state.status} / contrato ${state.contractStatus}. No se modificó la restricción."
                                     }'''
           m, n = re.subn(pattern, replacement, m, count=1, flags=re.S)
           if n != 1: raise SystemExit("No se encontró el bloque info = when para sustituir")
