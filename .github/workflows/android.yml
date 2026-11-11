@@ -40,6 +40,64 @@ jobs:
         run: |
           unzip -o CREDIXCEL-Control-fixed8-sin-bloqueos.zip -d buildsrc
 
+      - name: Corregir versión de Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_DIR="buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control/android/app"
+          BUILD_FILE=""
+          for candidate in "$APP_DIR/build.gradle.kts" "$APP_DIR/build.gradle"; do
+            if [ -f "$candidate" ]; then BUILD_FILE="$candidate"; break; fi
+          done
+          test -n "$BUILD_FILE"
+          python3 - "$BUILD_FILE" <<'PY'
+          import pathlib, re, sys
+          p = pathlib.Path(sys.argv[1])
+          s = p.read_text()
+          s, code_count = re.subn(r'(?m)^(\\s*versionCode\\s*=\\s*)\\d+', r'\\g<1>4', s)
+          s, name_count = re.subn(r'(?m)^(\\s*versionName\\s*=\\s*")[^"]*(".*)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/credixcel-signing"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
+          test -s "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/credixcel-signing/credixcel-release.jks" >> "$GITHUB_ENV"
+
+      - name: Compilar APK
+        run: |
+          cd buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control
+          gradle :android:app:assembleRelease --no-daemon
+
+      - name: Verificar APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+          test -n "$APK"
+          echo "APK generado: $APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          APKANALYZER="$(find "$ANDROID_HOME" -type f -name apkanalyzer -print -quit)"
+          test -n "$APKANALYZER"
+          "$APKANALYZER" manifest print "$APK" > manifest.txt
+          echo "=== Manifiesto ==="
+          cat manifest.txt
+
+      - name: Guardar APK y manifiesto
+        uses: actions/upload-artifact@v4
+        with:
+          name: CREDIXCEL-Control-Release
+          path: |
+            buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release/*.apk
+            manifest.txt
+          if-no-files-found: error
+, r'\\g<1>1.0.3\\g<2>', s)
+          if code_count != 1 or name_count != 1:
+              raise SystemExit(f"No se pudo actualizar la versión de forma segura: versionCode={code_count}, versionName={name_count}")
+          p.write_text(s)
+          print(f"Versión actualizada en {p}: versionCode=4, versionName=1.0.3")
+          PY
+
       - name: Preparar firma
         shell: bash
         run: |
