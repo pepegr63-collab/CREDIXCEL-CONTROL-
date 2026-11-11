@@ -51,11 +51,22 @@ jobs:
           done
           test -n "$BUILD_FILE"
           python3 - "$BUILD_FILE" <<'PY'
-          import pathlib, re, sys
+          import pathlib, sys
           p = pathlib.Path(sys.argv[1])
-          s = p.read_text()
-          s, code_count = re.subn(r'(?m)^(\\s*versionCode\\s*=\\s*)\\d+', r'\\g<1>4', s)
-          s, name_count = re.subn(r'(?m)^(\\s*versionName\\s*=\\s*")[^"]*(".*)
+          lines = p.read_text().splitlines()
+          code_hits = [i for i, line in enumerate(lines) if line.strip().startswith("versionCode")]
+          name_hits = [i for i, line in enumerate(lines) if line.strip().startswith("versionName")]
+          if len(code_hits) != 1 or len(name_hits) != 1:
+              raise SystemExit(f"No se pudo actualizar de forma segura: versionCode={len(code_hits)}, versionName={len(name_hits)}")
+          for i in code_hits:
+              lines[i] = lines[i][:len(lines[i]) - len(lines[i].lstrip())] + "versionCode = 4"
+          for i in name_hits:
+              lines[i] = lines[i][:len(lines[i]) - len(lines[i].lstrip())] + 'versionName = "1.0.3"'
+          p.write_text("\n".join(lines) + "\n")
+          print(f"Versión actualizada en {p}: versionCode=4, versionName=1.0.3")
+          PY
+
+      - name: Preparar firma
         shell: bash
         run: |
           set -euo pipefail
@@ -63,6 +74,7 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
           test -s "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/credixcel-signing/credixcel-release.jks" >> "$GITHUB_ENV"
+
 
       - name: Compilar APK
         run: |
