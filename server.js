@@ -5,6 +5,8 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { cert, getApps, initializeApp } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 
 const { Pool } = pg;
 const app = express();
@@ -21,6 +23,25 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
+let firebaseMessaging = null;
+try {
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (rawServiceAccount) {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    if (serviceAccount.project_id !== 'credixcel-control') {
+      throw new Error('El proyecto Firebase no coincide con credixcel-control.');
+    }
+    const appFirebase = getApps()[0] || initializeApp({
+      credential: cert(serviceAccount),
+      projectId: serviceAccount.project_id
+    });
+    firebaseMessaging = getMessaging(appFirebase);
+  }
+} catch (error) {
+  console.error('Firebase Admin no pudo inicializarse:', error.message);
+}
+
 
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
@@ -81,6 +102,21 @@ async function initDb() {
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS imei_2 TEXT;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS imei_source TEXT DEFAULT 'manual';
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS imei_updated_at TEXT;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS fcm_token TEXT;
+
+    CREATE TABLE IF NOT EXISTS device_commands (
+      id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL REFERENCES devices(id),
+      action TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      created_at TEXT NOT NULL,
+      sent_at TEXT,
+      completed_at TEXT,
+      result TEXT
+    );
+    CREATE INDEX IF NOT EXISTS device_commands_device_status_idx
+      ON device_commands(device_id, status, created_at);
+
 
     CREATE UNIQUE INDEX IF NOT EXISTS devices_imei_1_unique
     ON devices(imei_1) WHERE imei_1 IS NOT NULL AND imei_1 <> '';
@@ -128,6 +164,74 @@ app.post('/api/device/enroll', async (req, res, next) => {
     );
     await audit('DEVICE_ENROLLED', 'device', row.id, deviceName || '');
     res.json({ deviceId: row.id, deviceToken: token, status: row.status, message: row.message || '', uninstallBlocked: Boolean(row.uninstall_blocked) });
+  } catch (e) { next(e); }
+});
+
+
+app.post('/api/device/fcm-token', async (req, res, next) => {
+  try {
+    const { deviceId, deviceToken, fcmToken } = req.body || {};
+    if (!deviceId || !deviceToken || !fcmToken) {
+      return res.status(400).json({ error: 'deviceId, deviceToken y fcmToken son obligatorios.' });
+    }
+    const result = await pool.query(
+      'UPDATE devices SET fcm_token=$1, updated_at=$2 WHERE id=$3 AND device_token=$4',
+      [fcmToken, now(), deviceId, deviceToken]
+    );
+    if (!result.rowCount) return res.status(401).json({ error: 'Dispositivo no autorizado.' });
+    await audit('FCM_TOKEN_REGISTERED', 'device', deviceId);
+    res.json({ registered: true });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/device/commands/claim', async (req, res, next) => {
+  try {
+    const { deviceId, deviceToken, commandId } = req.body || {};
+    const device = await pool.query(
+      'SELECT id FROM devices WHERE id=$1 AND device_token=$2',
+      [deviceId, deviceToken]
+    );
+    if (!device.rowCount) return res.status(401).json({ error: 'Dispositivo no autorizado.' });
+    const result = await pool.query(
+      `UPDATE device_commands SET status='PROCESSING'
+       WHERE id=$1 AND device_id=$2 AND status='SENT'
+       RETURNING id, action`,
+      [commandId, deviceId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Orden no disponible.' });
+    res.json({ commandId: result.rows[0].id, action: result.rows[0].action });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/device/commands/ack', async (req, res, next) => {
+  try {
+    const { deviceId, deviceToken, commandId, success, result = '' } = req.body || {};
+    const device = await pool.query(
+      'SELECT id FROM devices WHERE id=$1 AND device_token=$2',
+      [deviceId, deviceToken]
+    );
+    if (!device.rowCount) return res.status(401).json({ error: 'Dispositivo no autorizado.' });
+    const command = await pool.query(
+      `SELECT action FROM device_commands
+       WHERE id=$1 AND device_id=$2 AND status='PROCESSING'`,
+      [commandId, deviceId]
+    );
+    if (!command.rowCount) return res.status(404).json({ error: 'Orden no encontrada o ya procesada.' });
+    const ok = success === true;
+    await pool.query(
+      'UPDATE device_commands SET status=$1, completed_at=$2, result=$3 WHERE id=$4',
+      [ok ? 'EXECUTED' : 'FAILED', now(), String(result).slice(0, 500), commandId]
+    );
+    if (ok && command.rows[0].action === 'LOCK_DEVICE') {
+      await pool.query(
+        "UPDATE devices SET status='LOCKED', message='Bloqueo remoto confirmado por el dispositivo', updated_at=$1 WHERE id=$2",
+        [now(), deviceId]
+      );
+      await audit('DEVICE_LOCKED_REMOTE', 'device', deviceId, commandId);
+    } else if (!ok) {
+      await audit('DEVICE_COMMAND_FAILED', 'device', deviceId, String(result).slice(0, 500));
+    }
+    res.json({ acknowledged: true, status: ok ? 'EXECUTED' : 'FAILED' });
   } catch (e) { next(e); }
 });
 
@@ -232,6 +336,51 @@ app.put('/api/admin/devices/:id/imei', admin, async (req, res, next) => {
     next(e);
   }
 });
+
+app.post('/api/admin/devices/:id/lock', admin, async (req, res, next) => {
+  try {
+    if (!firebaseMessaging) {
+      return res.status(503).json({ error: 'Firebase Cloud Messaging no está configurado en el servidor.' });
+    }
+    const found = await pool.query(
+      'SELECT id, status, fcm_token FROM devices WHERE id=$1',
+      [req.params.id]
+    );
+    const device = found.rows[0];
+    if (!device) return res.status(404).json({ error: 'Equipo no encontrado.' });
+    if (!device.fcm_token) return res.status(409).json({ error: 'El equipo todavía no ha registrado su token FCM. Abre la aplicación y sincroniza.' });
+    if (!['ACTIVE', 'PAYMENT_DUE'].includes(device.status)) {
+      return res.status(409).json({ error: 'El equipo no está en un estado que permita esta orden.' });
+    }
+
+    const commandId = id();
+    await pool.query(
+      "INSERT INTO device_commands(id,device_id,action,status,created_at) VALUES($1,$2,'LOCK_DEVICE','PENDING',$3)",
+      [commandId, device.id, now()]
+    );
+    try {
+      await firebaseMessaging.send({
+        token: device.fcm_token,
+        data: { commandId, deviceId: device.id, action: 'LOCK_DEVICE' },
+        android: { priority: 'high' }
+      });
+      await pool.query(
+        "UPDATE device_commands SET status='SENT', sent_at=$1 WHERE id=$2",
+        [now(), commandId]
+      );
+      await audit('DEVICE_LOCK_COMMAND_SENT', 'device', device.id, commandId);
+      res.json({ queued: true, commandId, message: 'Orden enviada; el estado cambiará cuando el equipo confirme la ejecución.' });
+    } catch (sendError) {
+      await pool.query(
+        "UPDATE device_commands SET status='FAILED', completed_at=$1, result=$2 WHERE id=$3",
+        [now(), String(sendError.message).slice(0, 500), commandId]
+      );
+      await audit('DEVICE_LOCK_COMMAND_SEND_FAILED', 'device', device.id, String(sendError.message).slice(0, 300));
+      res.status(502).json({ error: 'No se pudo enviar la notificación al dispositivo.' });
+    }
+  } catch (e) { next(e); }
+});
+
 app.post('/api/admin/devices/:id/state', admin, async (req, res, next) => {
   try {
     const { status, message = '' } = req.body;
