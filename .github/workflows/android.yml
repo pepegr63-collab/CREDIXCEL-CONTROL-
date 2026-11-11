@@ -242,6 +242,237 @@ jobs:
           print(f"Versión actualizada en {p}: versionCode=4, versionName=1.0.3")
           PY
 
+      - name: Agregar sincronización automática al iniciar y periódica
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$PROJECT_DIR/android/app/src/main"
+          PKG="$APP/java/com/credixcel/control"
+          mkdir -p "$PKG/background"
+          cat > "$PKG/background/DeviceSyncWorker.kt" <<'KOTLIN'
+          package com.credixcel.control.background
+
+          import android.content.Context
+          import androidx.work.CoroutineWorker
+          import androidx.work.WorkerParameters
+          import com.credixcel.control.data.Prefs
+          import com.credixcel.control.device.DeviceActions
+          import com.credixcel.control.network.CredixcelApi
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import kotlinx.serialization.json.Json
+          import okhttp3.OkHttpClient
+          import okhttp3.MediaType.Companion.toMediaType
+          import retrofit2.Retrofit
+          import retrofit2.converter.kotlinx.serialization.asConverterFactory
+          import java.net.URL
+
+          class DeviceSyncWorker(context: Context, params: WorkerParameters) :
+              CoroutineWorker(context, params) {
+              override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+                  val prefs = Prefs(applicationContext)
+                  val id = prefs.deviceId
+                  val token = prefs.token
+                  if (id.isNullOrBlank() || token.isNullOrBlank()) return@withContext Result.success()
+
+                  try {
+                      val base = prefs.serverUrl.trim().trimEnd('/')
+                      require(base.startsWith("https://", true) && URL(base).host.isNotBlank())
+                      val json = Json { ignoreUnknownKeys = true }
+                      val api = Retrofit.Builder()
+                          .baseUrl("$base/")
+                          .client(OkHttpClient.Builder().build())
+                          .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+                          .build().create(CredixcelApi::class.java)
+
+                      val state = api.sync(mapOf("deviceId" to id, "deviceToken" to token))
+                      when {
+                          state.status.equals("LOCKED", true) &&
+                              state.contractStatus.equals("ACTIVE", true) -> {
+                              DeviceActions.updateManagedLockAllowlist(applicationContext, true)
+                              prefs.isRestricted = true
+                          }
+                          state.status.equals("ACTIVE", true) -> {
+                              DeviceActions.updateManagedLockAllowlist(applicationContext, false)
+                              prefs.isRestricted = false
+                          }
+                      }
+                      prefs.lastSyncStatus = state.status
+                      prefs.lastSyncMessage = state.message.orEmpty()
+                      Result.success()
+                  } catch (_: Exception) {
+                      Result.retry()
+                  }
+              }
+          }
+          KOTLIN
+
+          cat > "$PKG/background/WorkScheduler.kt" <<'KOTLIN'
+          package com.credixcel.control.background
+
+          import android.content.Context
+          import androidx.work.Constraints
+          import androidx.work.ExistingPeriodicWorkPolicy
+          import androidx.work.ExistingWorkPolicy
+          import androidx.work.NetworkType
+          import androidx.work.OneTimeWorkRequestBuilder
+          import androidx.work.PeriodicWorkRequestBuilder
+          import androidx.work.WorkManager
+          import java.util.concurrent.TimeUnit
+
+          object WorkScheduler {
+              private const val PERIODIC_NAME = "credixcel-periodic-device-sync"
+              private const val BOOT_NAME = "credixcel-boot-device-sync"
+
+              fun schedule(context: Context) {
+                  val constraints = Constraints.Builder()
+                      .setRequiredNetworkType(NetworkType.CONNECTED)
+                      .build()
+                  val periodic = PeriodicWorkRequestBuilder<DeviceSyncWorker>(15, TimeUnit.MINUTES)
+                      .setConstraints(constraints)
+                      .build()
+                  WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                      PERIODIC_NAME, ExistingPeriodicWorkPolicy.UPDATE, periodic
+                  )
+              }
+
+              fun runNow(context: Context) {
+                  val constraints = Constraints.Builder()
+                      .setRequiredNetworkType(NetworkType.CONNECTED)
+                      .build()
+                  val request = OneTimeWorkRequestBuilder<DeviceSyncWorker>()
+                      .setConstraints(constraints)
+                      .build()
+                  WorkManager.getInstance(context).enqueueUniqueWork(
+                      BOOT_NAME, ExistingWorkPolicy.REPLACE, request
+                  )
+                  schedule(context)
+              }
+          }
+          KOTLIN
+
+          cat > "$PKG/background/BootReceiver.kt" <<'KOTLIN'
+          package com.credixcel.control.background
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+
+          class BootReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent?) {
+                  if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
+                      WorkScheduler.runNow(context)
+                  }
+              }
+          }
+          KOTLIN
+
+          python3 - "$APP/AndroidManifest.xml" "$PKG/data/Prefs.kt" "$PKG/device/DeviceActions.kt" "$PKG/MainActivity.kt" <<'PY'
+          import pathlib, sys
+          manifest, prefs, device, main = map(pathlib.Path, sys.argv[1:])
+          m = manifest.read_text()
+          if 'android.permission.RECEIVE_BOOT_COMPLETED' not in m:
+              m = m.replace('<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />',
+                            '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />')
+          if '.background.BootReceiver' not in m:
+              m = m.replace('    </application>', '''        <receiver
+              android:name=".background.BootReceiver"
+              android:enabled="true"
+              android:exported="true">
+              <intent-filter>
+                  <action android:name="android.intent.action.BOOT_COMPLETED" />
+              </intent-filter>
+          </receiver>
+          </application>''')
+          manifest.write_text(m)
+
+          p = prefs.read_text()
+          if 'var isRestricted:' not in p:
+              p += '''
+          \n    var isRestricted: Boolean
+              get() = p.getBoolean("is_restricted", false)
+              set(value) { p.edit().putBoolean("is_restricted", value).apply() }
+
+              var lastSyncStatus: String?
+                  get() = p.getString("last_sync_status", null)
+                  set(value) { p.edit().putString("last_sync_status", value).apply() }
+
+              var lastSyncMessage: String
+                  get() = p.getString("last_sync_message", "") ?: ""
+                  set(value) { p.edit().putString("last_sync_message", value).apply() }
+          }
+          '''
+              # The original class already ends with }, so remove that ending before appending properties.
+              p = prefs.read_text().rstrip()
+              if not p.endswith('}'): raise SystemExit("Prefs.kt no termina como se esperaba")
+              p = p[:-1] + '''
+              var isRestricted: Boolean
+                  get() = p.getBoolean("is_restricted", false)
+                  set(value) { p.edit().putBoolean("is_restricted", value).apply() }
+
+              var lastSyncStatus: String?
+                  get() = p.getString("last_sync_status", null)
+                  set(value) { p.edit().putString("last_sync_status", value).apply() }
+
+              var lastSyncMessage: String
+                  get() = p.getString("last_sync_message", "") ?: ""
+                  set(value) { p.edit().putString("last_sync_message", value).apply() }
+          }
+          '''
+              prefs.write_text(p)
+
+          d = device.read_text()
+          if 'fun updateManagedLockAllowlist(' not in d:
+              helper = '''
+              /** Actualiza la lista de Lock Task desde el worker; no inicia una Activity en segundo plano. */
+              fun updateManagedLockAllowlist(context: Context, locked: Boolean): Boolean {
+                  if (!isDeviceOwner(context)) return false
+                  return try {
+                      val manager = dpm(context)
+                      if (locked) {
+                          manager.setLockTaskPackages(admin(context), arrayOf(context.packageName))
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                              manager.setLockTaskFeatures(
+                                  admin(context),
+                                  DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS or
+                                      DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD
+                              )
+                          }
+                      } else {
+                          manager.setLockTaskPackages(admin(context), emptyArray())
+                      }
+                      true
+                  } catch (_: Exception) { false }
+              }
+
+          '''
+              needle = '    fun lock(context: Context): Boolean {'
+              if needle not in d: raise SystemExit("No se encontró punto de inserción en DeviceActions.kt")
+              d = d.replace(needle, helper + needle, 1)
+              device.write_text(d)
+
+          a = main.read_text()
+          a = a.replace('var isRestricted by remember { mutableStateOf(false) }',
+                        'var isRestricted by remember { mutableStateOf(prefs.isRestricted) }')
+          if 'WorkScheduler.runNow(this@MainActivity)' not in a:
+              a = a.replace('        val prefs = Prefs(this)\n',
+                            '        val prefs = Prefs(this)\n        com.credixcel.control.background.WorkScheduler.runNow(this)\n')
+          main.write_text(a)
+
+          b = pathlib.Path(sys.argv[1]).parents[0]
+          build = b.parent / "build.gradle.kts"
+          if not build.exists(): build = b.parent / "build.gradle"
+          if not build.exists(): raise SystemExit("No se encontró archivo Gradle para versionar")
+          s = build.read_text()
+          import re
+          s, n1 = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>5', s, count=1)
+          s, n2 = re.subn(r'(?m)^(\s*versionName\s*=\s*)"[^"]+"', r'\g<1>"1.0.4"', s, count=1)
+          if n1 != 1 or n2 != 1: raise SystemExit(f"No se pudo versionar: code={n1}, name={n2}")
+          build.write_text(s)
+          print("Sincronización automática instalada; versión 1.0.4 (code 5).")
+          PY
+          grep -n -E 'BootReceiver|RECEIVE_BOOT_COMPLETED' "$APP/AndroidManifest.xml"
+          grep -n -E 'updateManagedLockAllowlist|isRestricted|lastSyncStatus' "$PKG/device/DeviceActions.kt" "$PKG/data/Prefs.kt" "$PKG/MainActivity.kt"
       - name: Preparar firma
         shell: bash
         run: |
