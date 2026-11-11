@@ -270,7 +270,8 @@ app.get('/api/admin/dashboard', admin, async (req, res, next) => {
 app.get('/api/admin/devices', admin, async (req, res, next) => {
   try {
     const r = await pool.query(`
-      SELECT d.*, c.name AS client_name, c.id AS client_id,
+      SELECT d.*, (d.fcm_token IS NOT NULL AND d.fcm_token <> '') AS fcm_registered,
+      c.name AS client_name, c.id AS client_id,
       ct.id AS contract_id, ct.status AS contract_status
       FROM devices d LEFT JOIN contracts ct ON ct.device_id=d.id
       LEFT JOIN clients c ON c.id=ct.client_id ORDER BY d.updated_at DESC
