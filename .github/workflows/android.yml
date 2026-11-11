@@ -60,28 +60,161 @@ jobs:
           echo "Proyecto Android encontrado: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Añadir diagnóstico de estado recibido por Android
+      - name: Aplicar modo de restricción administrada Lock Task
         shell: bash
         run: |
           set -euo pipefail
-          MAIN_ACTIVITY="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
-          test -f "$MAIN_ACTIVITY"
+          APP="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control"
+          DEVICE="$APP/device/DeviceActions.kt"
+          MAIN="$APP/MainActivity.kt"
+          test -f "$DEVICE" && test -f "$MAIN"
           echo "=== Huella del ZIP realmente compilado ==="
           sha256sum CREDIXCEL-Control-fixed9-sin-bloqueos.zip
-          python3 - "$MAIN_ACTIVITY" <<'PY'
+          python3 - "$DEVICE" "$MAIN" <<'PY'
           import pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          source = p.read_text()
-          old = '"Sincronización completada correctamente. No se solicitó bloqueo de pantalla."'
-          new = '"Sincronización recibida: estado servidor=${state.status}, contrato=${state.contractStatus}. No se solicitó bloqueo de pantalla."'
-          count = source.count(old)
-          if count != 1:
-              raise SystemExit(f"Parche diagnóstico cancelado: se esperaba 1 coincidencia y se encontraron {count}")
-          p.write_text(source.replace(old, new, 1))
-          print("Diagnóstico agregado: la app mostrará status y contractStatus recibidos del servidor.")
+          device, main = map(pathlib.Path, sys.argv[1:])
+          d = device.read_text()
+          marker = '    fun lock(context: Context): Boolean {'
+          methods = '''
+              /** Entra en Lock Task administrado sin ocultar menú de encendido ni pantalla de emergencia. */
+              fun enterManagedLock(activity: android.app.Activity): Boolean {
+                  if (!isDeviceOwner(activity)) return false
+                  return try {
+                      val manager = dpm(activity)
+                      manager.setLockTaskPackages(admin(activity), arrayOf(activity.packageName))
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                          manager.setLockTaskFeatures(
+                              admin(activity),
+                              DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS or
+                                  DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD
+                          )
+                      }
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                          activity.getSystemService(android.app.ActivityManager::class.java).lockTaskModeState !=
+                          android.app.ActivityManager.LOCK_TASK_MODE_NONE) return true
+                      activity.startLockTask()
+                      true
+                  } catch (_: Exception) { false }
+              }
+
+              /** Sale del modo administrado cuando una respuesta autenticada informa ACTIVE. */
+              fun exitManagedLock(activity: android.app.Activity): Boolean {
+                  if (!isDeviceOwner(activity)) return false
+                  return try {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                          activity.getSystemService(android.app.ActivityManager::class.java).lockTaskModeState !=
+                          android.app.ActivityManager.LOCK_TASK_MODE_NONE) activity.stopLockTask()
+                      dpm(activity).setLockTaskPackages(admin(activity), emptyArray())
+                      true
+                  } catch (_: Exception) { false }
+              }
+
+          '''
+          if 'fun enterManagedLock(' not in d:
+              if d.count(marker) != 1: raise SystemExit('No se localizó el punto de inserción de DeviceActions')
+              d = d.replace(marker, methods + marker, 1)
+          m = main.read_text()
+          if 'var isRestricted by remember' not in m:
+              anchor = '''        var busy by remember {
+                      mutableStateOf(false)
+                  }'''
+              replacement = anchor + '\n\n                  var isRestricted by remember { mutableStateOf(false) }'
+              if m.count(anchor) != 1: raise SystemExit('No se localizó estado busy en MainActivity')
+              m = m.replace(anchor, replacement, 1)
+          anchor = '''                ) {
+
+                      Text(
+                          "CREDIXCEL Control",'''
+          restricted = '''                ) {
+                      if (isRestricted) {
+                          Text("CREDIXCEL Control", style = MaterialTheme.typography.headlineMedium)
+                          Text("DISPOSITIVO RESTRINGIDO", style = MaterialTheme.typography.headlineSmall)
+                          Text("El administrador ha aplicado una restricción por el estado del contrato.")
+                          Text("Comunícate con el administrador del financiamiento para regularizar el servicio.")
+                          Text("Las llamadas de emergencia y el menú de encendido permanecen disponibles.")
+                          Button(enabled = hasCredentials && !busy, onClick = {
+                              scope.launch {
+                                  busy = true
+                                  try {
+                                      val id = deviceId ?: prefs.deviceId ?: error("No hay ID de dispositivo")
+                                      val token = prefs.token ?: error("No hay credencial guardada")
+                                      val state = buildApi(server).sync(mapOf("deviceId" to id, "deviceToken" to token))
+                                      lastStatus = state.status
+                                      contractStatus = state.contractStatus
+                                      serverMessage = state.message.orEmpty()
+                                      if (state.status.equals("ACTIVE", true)) {
+                                          if (DeviceActions.exitManagedLock(this@MainActivity)) {
+                                              isRestricted = false
+                                              info = "Estado ACTIVE confirmado. Restricción administrada retirada."
+                                          } else info = "ACTIVE confirmado, pero Android no permitió retirar el modo administrado."
+                                      } else if (state.status.equals("LOCKED", true) && state.contractStatus.equals("ACTIVE", true)) {
+                                          info = "El servidor mantiene LOCKED. La restricción continúa activa."
+                                      } else info = "El servidor no confirmó un estado que permita cambiar la restricción."
+                                  } catch (e: Exception) {
+                                      info = "No se pudo consultar al servidor; la restricción actual se mantiene: ${e.localizedMessage ?: e.javaClass.simpleName}"
+                                  } finally { busy = false }
+                              }
+                          }, modifier = Modifier.fillMaxWidth()) {
+                              Text(if (busy) "Consultando…" else "Consultar estado para liberar")
+                          }
+                      } else {
+                      Text(
+                          "CREDIXCEL Control",'''
+          if 'DISPOSITIVO RESTRINGIDO' not in m:
+              if m.count(anchor) != 1: raise SystemExit('No se localizó el inicio del contenido Compose')
+              m = m.replace(anchor, restricted, 1)
+              end = '''                    Text(
+                          "La sincronización consulta el estado del servidor. No aplica bloqueos ni restricciones automáticas. Device Owner requiere aprovisionamiento Android independiente.",
+                          style = MaterialTheme.typography.bodySmall
+                      )
+                  }
+              }
+          }'''
+              endnew = '''                    Text(
+                          "La sincronización consulta el estado del servidor. Las restricciones administradas solo se activan con respuesta autenticada LOCKED y contrato ACTIVE.",
+                          style = MaterialTheme.typography.bodySmall
+                      )
+                      }
+                  }
+              }
+          }'''
+              if m.count(end) != 1: raise SystemExit('No se localizó el cierre del contenido Compose')
+              m = m.replace(end, endnew, 1)
+          oldlock = '''                                                  if (DeviceActions.lock(this@MainActivity)) {
+                                                          "Orden LOCKED recibida y bloqueo de pantalla solicitado a Android."
+                                                      } else {
+                                                          "El servidor indicó LOCKED, pero CREDIXCEL no tiene autorización Device Owner para bloquear la pantalla."
+                                                      }'''
+          newlock = '''                                                  isRestricted = true
+                                                      if (DeviceActions.enterManagedLock(this@MainActivity)) {
+                                                          "Orden LOCKED confirmada. Modo de restricción administrada activado."
+                                                      } else {
+                                                          isRestricted = false
+                                                          "Android no permitió iniciar el modo administrado. No se aplicó una restricción parcial."
+                                                      }'''
+          if 'DeviceActions.enterManagedLock(this@MainActivity)' not in m:
+              if m.count(oldlock) != 1: raise SystemExit('No se localizó la rama LOCKED para sustituir')
+              m = m.replace(oldlock, newlock, 1)
+          oldelse = '''                                          else ->
+                                                      "Sincronización completada correctamente. No se solicitó bloqueo de pantalla."'''
+          newelse = '''                                          state.status.equals("ACTIVE", ignoreCase = true) -> {
+                                                      isRestricted = false
+                                                      if (DeviceActions.exitManagedLock(this@MainActivity)) {
+                                                          "Estado ACTIVE confirmado. Restricción administrada retirada."
+                                                      } else {
+                                                          "ACTIVE confirmado, pero Android no permitió retirar el modo administrado."
+                                                      }
+                                                  }
+                                                  else ->
+                                                      "Estado recibido: ${state.status} / contrato ${state.contractStatus}. No se cambió la restricción."'''
+          if 'Estado ACTIVE confirmado. Restricción administrada retirada.' not in m:
+              if m.count(oldelse) != 1: raise SystemExit('No se localizó rama else para sustituir')
+              m = m.replace(oldelse, newelse, 1)
+          device.write_text(d)
+          main.write_text(m)
+          print('Lock Task administrado añadido; acceso a global actions/keyguard conservado; consulta disponible desde pantalla restringida.')
           PY
-          echo "=== Fragmento de sincronización que se compilará ==="
-          grep -n -A 18 -B 4 'info = when' "$MAIN_ACTIVITY"
+          grep -n -E 'enterManagedLock|exitManagedLock|DISPOSITIVO RESTRINGIDO|Estado ACTIVE confirmado' "$DEVICE" "$MAIN"
 
       - name: Publicar código fuente extraído para revisión
         uses: actions/upload-artifact@v4
