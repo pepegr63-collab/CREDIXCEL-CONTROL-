@@ -133,7 +133,7 @@ async function loadDevices() {
       title.textContent = d.device_name || 'Equipo sin enrolar';
 
       const info = document.createElement('p');
-      info.textContent = `Estado: ${d.status} · Cliente: ${d.client_name || 'Sin asignar'} · Código: ${d.enrollment_code}`;
+      info.textContent = `Estado: ${d.status} · Firebase: ${d.fcm_registered ? 'Token registrado' : 'Pendiente'} · Cliente: ${d.client_name || 'Sin asignar'} · Código: ${d.enrollment_code}`;
 
       const imeiTitle = document.createElement('h4');
       imeiTitle.textContent = 'Identificadores IMEI';
