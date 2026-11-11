@@ -355,7 +355,7 @@ app.post('/api/admin/devices/:id/lock', admin, async (req, res, next) => {
 
     const commandId = id();
     await pool.query(
-      "INSERT INTO device_commands(id,device_id,action,status,created_at) VALUES($1,$2,'LOCK_DEVICE','PENDING',$3)",
+      "INSERT INTO device_commands(id,device_id,action,status,created_at,sent_at) VALUES($1,$2,'LOCK_DEVICE','SENT',$3,$3)",
       [commandId, device.id, now()]
     );
     try {
@@ -364,10 +364,6 @@ app.post('/api/admin/devices/:id/lock', admin, async (req, res, next) => {
         data: { commandId, deviceId: device.id, action: 'LOCK_DEVICE' },
         android: { priority: 'high' }
       });
-      await pool.query(
-        "UPDATE device_commands SET status='SENT', sent_at=$1 WHERE id=$2",
-        [now(), commandId]
-      );
       await audit('DEVICE_LOCK_COMMAND_SENT', 'device', device.id, commandId);
       res.json({ queued: true, commandId, message: 'Orden enviada; el estado cambiará cuando el equipo confirme la ejecución.' });
     } catch (sendError) {
