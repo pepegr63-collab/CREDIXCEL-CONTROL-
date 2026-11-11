@@ -51,14 +51,14 @@ jobs:
 
       - name: Compilar APK
         run: |
-          cd buildsrc/CREDIXCEL-Control
+          cd buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control
           gradle :android:app:assembleRelease --no-daemon
 
       - name: Verificar APK
         shell: bash
         run: |
           set -euo pipefail
-          APK="$(find buildsrc/CREDIXCEL-Control/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+          APK="$(find buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
           test -n "$APK"
           echo "APK generado: $APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
@@ -73,6 +73,6 @@ jobs:
         with:
           name: CREDIXCEL-Control-Release
           path: |
-            buildsrc/CREDIXCEL-Control/android/app/build/outputs/apk/release/*.apk
+            buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release/*.apk
             manifest.txt
           if-no-files-found: error
