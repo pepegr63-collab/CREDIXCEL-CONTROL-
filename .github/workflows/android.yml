@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/android.yml"
-      - "CREDIXCEL-Control-fixed9-sin-bloqueos*.zip"
+      - "CREDIXCEL-Control-fixed9-sin-bloqueos.zip"
 
 jobs:
   build:
@@ -40,7 +40,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ZIP="$(find . -maxdepth 1 -type f -name 'CREDIXCEL-Control-fixed9-sin-bloqueos*.zip' -print -quit)"
+          ZIP="$(find . -maxdepth 1 -type f -name 'CREDIXCEL-Control-fixed9-sin-bloqueos.zip' -print -quit)"
           if [ -z "$ZIP" ]; then
             echo "No se encontró el ZIP fixed9 en la raíz del repositorio."
             ls -la
