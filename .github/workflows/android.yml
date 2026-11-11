@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/android.yml"
-      - "CREDIXCEL-Control-fixed9-sin-bloqueos.zip"
+      - "CREDIXCEL-Control-fixed9-sin-bloqueos*.zip"
 
 jobs:
   build:
@@ -37,8 +37,17 @@ jobs:
           gradle-version: "8.9"
 
       - name: Extraer proyecto Android
+        shell: bash
         run: |
-          unzip -o CREDIXCEL-Control-fixed9-sin-bloqueos.zip -d buildsrc
+          set -euo pipefail
+          ZIP="$(find . -maxdepth 1 -type f -name 'CREDIXCEL-Control-fixed9-sin-bloqueos*.zip' -print -quit)"
+          if [ -z "$ZIP" ]; then
+            echo "No se encontró el ZIP fixed9 en la raíz del repositorio."
+            ls -la
+            exit 1
+          fi
+          echo "ZIP encontrado: $ZIP"
+          unzip -o "$ZIP" -d buildsrc
 
       - name: Corregir versión de Android
         shell: bash
@@ -49,7 +58,11 @@ jobs:
           for candidate in "$APP_DIR/build.gradle.kts" "$APP_DIR/build.gradle"; do
             if [ -f "$candidate" ]; then BUILD_FILE="$candidate"; break; fi
           done
-          test -n "$BUILD_FILE"
+          if [ -z "$BUILD_FILE" ]; then
+            echo "No se encontró build.gradle(.kts) en $APP_DIR"
+            find buildsrc -maxdepth 7 -type f \( -name build.gradle -o -name build.gradle.kts \)
+            exit 1
+          fi
           python3 - "$BUILD_FILE" <<'PY'
           import pathlib, sys
           p = pathlib.Path(sys.argv[1])
