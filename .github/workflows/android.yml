@@ -60,6 +60,29 @@ jobs:
           echo "Proyecto Android encontrado: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+      - name: Añadir diagnóstico de estado recibido por Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN_ACTIVITY="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          test -f "$MAIN_ACTIVITY"
+          echo "=== Huella del ZIP realmente compilado ==="
+          sha256sum CREDIXCEL-Control-fixed9-sin-bloqueos.zip
+          python3 - "$MAIN_ACTIVITY" <<'PY'
+          import pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          source = p.read_text()
+          old = '"Sincronización completada correctamente. No se solicitó bloqueo de pantalla."'
+          new = '"Sincronización recibida: estado servidor=${state.status}, contrato=${state.contractStatus}. No se solicitó bloqueo de pantalla."'
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(f"Parche diagnóstico cancelado: se esperaba 1 coincidencia y se encontraron {count}")
+          p.write_text(source.replace(old, new, 1))
+          print("Diagnóstico agregado: la app mostrará status y contractStatus recibidos del servidor.")
+          PY
+          echo "=== Fragmento de sincronización que se compilará ==="
+          grep -n -A 18 -B 4 'info = when' "$MAIN_ACTIVITY"
+
       - name: Publicar código fuente extraído para revisión
         uses: actions/upload-artifact@v4
         with:
