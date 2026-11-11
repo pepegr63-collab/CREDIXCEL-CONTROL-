@@ -71,7 +71,7 @@ jobs:
           echo "=== Huella del ZIP realmente compilado ==="
           sha256sum CREDIXCEL-Control-fixed9-sin-bloqueos.zip
           python3 - "$DEVICE" "$MAIN" <<'PY'
-          import pathlib, re, sys
+          import pathlib, re, sys, textwrap
           device, main = map(pathlib.Path, sys.argv[1:])
           d = device.read_text()
           m = main.read_text()
@@ -110,6 +110,7 @@ jobs:
               }
 
               """
+              method = textwrap.dedent(method)
               if not re.search(r"^\s*fun lock\(context: Context\)", d, re.M):
                   raise SystemExit("No se encontró función lock en DeviceActions.kt")
               d = re.sub(r"(?=^\s*fun lock\(context: Context\))", method, d, count=1, flags=re.M)
