@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/android.yml"
+      - "scripts/prepare_android_fcm.py"
       - "CREDIXCEL-Control-fixed7-sin-bloqueos.zip"
 
 jobs:
@@ -39,6 +40,12 @@ jobs:
       - name: Extraer proyecto Android
         run: |
           unzip -o CREDIXCEL-Control-fixed7-sin-bloqueos.zip -d buildsrc
+
+      - name: Integrar Firebase Cloud Messaging
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          python3 scripts/prepare_android_fcm.py
 
       - name: Preparar firma
         shell: bash
