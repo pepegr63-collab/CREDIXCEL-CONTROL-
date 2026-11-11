@@ -454,14 +454,17 @@ jobs:
           a = main.read_text()
           a = a.replace('var isRestricted by remember { mutableStateOf(false) }',
                         'var isRestricted by remember { mutableStateOf(prefs.isRestricted) }')
+          if "window.decorView.post" not in a:
+              a = a.replace('        setContent {\n            App(prefs)\n        }',
+                            '        setContent {\n            App(prefs)\n        }\n        if (prefs.isRestricted && DeviceActions.isDeviceOwner(this)) {\n            window.decorView.post { DeviceActions.enterManagedLock(this) }\n        }')
           if 'WorkScheduler.runNow(this@MainActivity)' not in a:
               a = a.replace('        val prefs = Prefs(this)\n',
                             '        val prefs = Prefs(this)\n        com.credixcel.control.background.WorkScheduler.runNow(this)\n')
           main.write_text(a)
 
           b = pathlib.Path(sys.argv[1]).parents[0]
-          build = b.parent / "build.gradle.kts"
-          if not build.exists(): build = b.parent / "build.gradle"
+          build = b.parent.parent / "build.gradle.kts"
+          if not build.exists(): build = b.parent.parent / "build.gradle"
           if not build.exists(): raise SystemExit("No se encontró archivo Gradle para versionar")
           s = build.read_text()
           import re
