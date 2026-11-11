@@ -289,8 +289,7 @@ jobs:
                       when {
                           state.status.equals("LOCKED", true) &&
                               state.contractStatus.equals("ACTIVE", true) -> {
-                              DeviceActions.updateManagedLockAllowlist(applicationContext, true)
-                              prefs.isRestricted = true
+                              prefs.isRestricted = DeviceActions.updateManagedLockAllowlist(applicationContext, true)
                           }
                           state.status.equals("ACTIVE", true) -> {
                               DeviceActions.updateManagedLockAllowlist(applicationContext, false)
