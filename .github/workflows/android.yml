@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/android.yml"
-      - "CREDIXCEL-Control-fixed8-sin-bloqueos.zip"
+      - "CREDIXCEL-Control-fixed9-sin-bloqueos.zip"
 
 jobs:
   build:
@@ -38,13 +38,13 @@ jobs:
 
       - name: Extraer proyecto Android
         run: |
-          unzip -o CREDIXCEL-Control-fixed8-sin-bloqueos.zip -d buildsrc
+          unzip -o CREDIXCEL-Control-fixed9-sin-bloqueos.zip -d buildsrc
 
       - name: Corregir versión de Android
         shell: bash
         run: |
           set -euo pipefail
-          APP_DIR="buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control/android/app"
+          APP_DIR="buildsrc/CREDIXCEL-Control-fixed9-sin-bloqueos/CREDIXCEL-Control/android/app"
           BUILD_FILE=""
           for candidate in "$APP_DIR/build.gradle.kts" "$APP_DIR/build.gradle"; do
             if [ -f "$candidate" ]; then BUILD_FILE="$candidate"; break; fi
@@ -79,14 +79,14 @@ jobs:
 
       - name: Compilar APK
         run: |
-          cd buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control
+          cd buildsrc/CREDIXCEL-Control-fixed9-sin-bloqueos/CREDIXCEL-Control
           gradle :android:app:assembleRelease --no-daemon
 
       - name: Verificar APK
         shell: bash
         run: |
           set -euo pipefail
-          APK="$(find buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+          APK="$(find buildsrc/CREDIXCEL-Control-fixed9-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
           test -n "$APK"
           echo "APK generado: $APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
@@ -101,6 +101,6 @@ jobs:
         with:
           name: CREDIXCEL-Control-Release
           path: |
-            buildsrc/CREDIXCEL-Control-fixed8-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release/*.apk
+            buildsrc/CREDIXCEL-Control-fixed9-sin-bloqueos/CREDIXCEL-Control/android/app/build/outputs/apk/release/*.apk
             manifest.txt
           if-no-files-found: error
