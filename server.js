@@ -102,15 +102,34 @@ app.post('/api/device/sync', async (req, res, next) => {
   try {
     const { deviceId, deviceToken } = req.body || {};
     const result = await pool.query(
-      `SELECT d.*, c.status AS contract_status
-       FROM devices d LEFT JOIN contracts c ON c.device_id=d.id
+      `SELECT d.*, contract.status AS contract_status
+       FROM devices d
+       LEFT JOIN LATERAL (
+         SELECT status
+         FROM contracts
+         WHERE device_id = d.id
+         ORDER BY created_at DESC NULLS LAST
+         LIMIT 1
+       ) contract ON TRUE
        WHERE d.id=$1 AND d.device_token=$2`,
       [deviceId, deviceToken]
     );
     const row = result.rows[0];
     if (!row) return res.status(401).json({ error: 'Unauthorized device' });
+
     await pool.query('UPDATE devices SET updated_at=$1 WHERE id=$2', [now(), deviceId]);
-    res.json({ deviceId: row.id, status: row.status, message: row.message || '', uninstallBlocked: Boolean(row.uninstall_blocked), contractStatus: row.contract_status || 'ACTIVE', updatedAt: row.updated_at });
+
+    // Fail closed: a missing linked contract is never reported as ACTIVE.
+    // The Android app may request lockNow() only for LOCKED + ACTIVE.
+    const contractStatus = row.contract_status || 'NO_CONTRACT';
+    res.json({
+      deviceId: row.id,
+      status: row.status,
+      message: row.message || '',
+      uninstallBlocked: Boolean(row.uninstall_blocked),
+      contractStatus,
+      updatedAt: row.updated_at
+    });
   } catch (e) { next(e); }
 });
 
@@ -171,8 +190,10 @@ app.post('/api/admin/devices/:id/uninstall-policy', admin, async (req, res, next
 });
 
 app.get('/api/admin/clients', admin, async (req, res, next) => {
-  try { res.json((await pool.query('SELECT * FROM clients ORDER BY created_at DESC')).rows); }
-  catch (e) { next(e); }
+  try {
+    const r = await pool.query('SELECT * FROM clients ORDER BY created_at DESC');
+    res.json(r.rows);
+  } catch (e) { next(e); }
 });
 
 app.post('/api/admin/clients', admin, async (req, res, next) => {
@@ -188,11 +209,12 @@ app.post('/api/admin/clients', admin, async (req, res, next) => {
 
 app.get('/api/admin/contracts', admin, async (req, res, next) => {
   try {
-    res.json((await pool.query(`
+    const r = await pool.query(`
       SELECT ct.*, c.name AS client_name, d.device_name
       FROM contracts ct JOIN clients c ON c.id=ct.client_id
       LEFT JOIN devices d ON d.id=ct.device_id ORDER BY ct.created_at DESC
-    `)).rows);
+    `);
+    res.json(r.rows);
   } catch (e) { next(e); }
 });
 
@@ -212,11 +234,12 @@ app.post('/api/admin/contracts', admin, async (req, res, next) => {
 
 app.get('/api/admin/payments', admin, async (req, res, next) => {
   try {
-    res.json((await pool.query(`
-      SELECT p.*, ct.client_id, c.name AS client_name FROM payments p
-      JOIN contracts ct ON ct.id=p.contract_id JOIN clients c ON c.id=ct.client_id
-      ORDER BY p.due_date DESC
-    `)).rows);
+    const r = await pool.query(`
+      SELECT p.*, ct.client_id, c.name AS client_name
+      FROM payments p JOIN contracts ct ON ct.id=p.contract_id
+      JOIN clients c ON c.id=ct.client_id ORDER BY p.due_date DESC
+    `);
+    res.json(r.rows);
   } catch (e) { next(e); }
 });
 
@@ -234,26 +257,22 @@ app.post('/api/admin/payments', admin, async (req, res, next) => {
 app.post('/api/admin/payments/:id/pay', admin, async (req, res, next) => {
   try {
     const r = await pool.query("UPDATE payments SET status='PAID',paid_at=$1 WHERE id=$2", [now(), req.params.id]);
-    await audit('PAYMENT_PAID', 'payment', req.params.id);
+    await audit('PAYMENT_MARKED_PAID', 'payment', req.params.id);
     res.json({ updated: r.rowCount });
   } catch (e) { next(e); }
 });
 
 app.get('/api/admin/audit', admin, async (req, res, next) => {
-  try { res.json((await pool.query('SELECT * FROM audit ORDER BY created_at DESC LIMIT 200')).rows); }
-  catch (e) { next(e); }
+  try {
+    const r = await pool.query('SELECT * FROM audit ORDER BY created_at DESC LIMIT 200');
+    res.json(r.rows);
+  } catch (e) { next(e); }
 });
 
 app.use((err, req, res, next) => {
-  console.error('Request failed:', err.message);
+  console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-const port = process.env.PORT || 3000;
-initDb()
-  .then(() => app.listen(port, () => console.log(`CREDIXCEL Control API running on :${port}`)))
-  .catch(err => {
-    console.error('Database initialization failed:', err.message);
-    process.exit(1);
-  });
-
+const port = Number(process.env.PORT || 3000);
+initDb().then(() => app.listen(port, () => console.log(`CREDIXCEL Control API listening on ${port}`)));
