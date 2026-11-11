@@ -195,7 +195,6 @@ jobs:
           main.write_text(m)
           print("Parche Lock Task aplicado; rama restringida y liberación al confirmar ACTIVE.")
           PY
-          PY
           grep -n -E 'enterManagedLock|exitManagedLock|DISPOSITIVO RESTRINGIDO|Estado ACTIVE confirmado' "$DEVICE" "$MAIN"
 
       - name: Publicar código fuente extraído para revisión
