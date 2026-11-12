@@ -54,24 +54,29 @@ jobs:
           echo "Proyecto detectado: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Validar que LOCKED siempre mantenga Lock Task
+      - name: Aplicar corrección de bloqueo, reinicio y liberación
         shell: bash
         run: |
           set -euo pipefail
+          python3 .github/scripts/configure_home.py "$PROJECT_DIR"
           MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          DEVICE="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/device/DeviceActions.kt"
           test -f "$MAIN"
+          test -f "$DEVICE"
           python3 - "$MAIN" <<'PY'
-          import pathlib, re, sys
-          p = pathlib.Path(sys.argv[1])
-          s = p.read_text()
-          expected = 'device == "LOCKED" -> activateKiosk()'
-          if expected not in s:
-              raise SystemExit("ERROR: la fuente no activa/mantiene Lock Task ante LOCKED sin depender del estado del contrato.")
-          if 'device == "LOCKED" && contract == "ACTIVE" -> activateKiosk()' in s:
-              raise SystemExit("ERROR: se detectó la condición incorrecta LOCKED + ACTIVE; LOCKED debe prevalecer por sí solo.")
-          print("OK: LOCKED activa/mantiene Lock Task independientemente del estado del contrato.")
+          import pathlib, sys
+          s = pathlib.Path(sys.argv[1]).read_text()
+          checks = {
+              "LOCKED activa sin depender del contrato": 'state.status.equals("LOCKED", true) -> {' in s,
+              "liberación exige ACTIVE + ACTIVE": 'state.status.equals("ACTIVE", true) && state.contractStatus.equals("ACTIVE", true)' in s,
+              "recuperación al iniciar": 'DeviceActions.enterManagedLock(this)' in s,
+              "errores conservan restricción": 'se conserva la última restricción conocida' in s,
+          }
+          for label, ok in checks.items():
+              print(("OK: " if ok else "ERROR: ") + label)
+          if not all(checks.values()):
+              raise SystemExit("La fuente no cumple todos los criterios de bloqueo.")
           PY
-          grep -n -A2 -B2 'device == "LOCKED"' "$MAIN"
 
       - name: Corregir retorno al HOME real del Motorola y versionar 1.1.0
         shell: bash
