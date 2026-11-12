@@ -360,6 +360,78 @@ jobs:
           print("OK: rollback de protección ante cada fallo; versión 1.1.4.")
           PY
 
+      - name: Seleccionar HOME real sin ambigüedad y versionar 1.1.5
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$BUILD" <<'PY'
+          import pathlib, sys
+          main_path, build_path = map(pathlib.Path, sys.argv[1:])
+          s = main_path.read_text()
+          start = s.find("    private fun openSystemHome(): Boolean {")
+          end = s.find("\n    private fun restoreKioskAfterFailedRelease()", start)
+          if start < 0 or end < 0:
+              raise SystemExit("No se encontró el selector HOME actual para sustituirlo.")
+          helper = '''    /**
+           * Open the user's real Android HOME. Prefer the system's current default;
+           * otherwise accept only one unambiguous external HOME candidate.
+           */
+          private fun openSystemHome(): Boolean {
+              val candidates = mutableListOf<android.content.pm.ResolveInfo>()
+              val defaultHome = packageManager.getHomeActivities(candidates)
+
+              fun isExternalLauncher(info: android.content.pm.ResolveInfo): Boolean {
+                  val activity = info.activityInfo ?: return false
+                  return activity.packageName != packageName &&
+                      !activity.name.endsWith(".ResolverActivity") &&
+                      activity.enabled && activity.exported
+              }
+
+              val selected = defaultHome?.let { component ->
+                  candidates.firstOrNull { info ->
+                      val activity = info.activityInfo
+                      activity != null &&
+                          activity.packageName == component.packageName &&
+                          activity.name == component.className &&
+                          isExternalLauncher(info)
+                  }
+              } ?: candidates.filter(::isExternalLauncher).singleOrNull()
+
+              val activity = selected?.activityInfo ?: return false
+              val homeComponent = android.content.ComponentName(activity.packageName, activity.name)
+              val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                  addCategory(Intent.CATEGORY_HOME)
+                  component = homeComponent
+                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+              }
+              return runCatching {
+                  startActivity(homeIntent)
+                  true
+              }.getOrDefault(false)
+          }
+'''
+          s = s[:start] + helper + s[end:]
+          checks = [
+              "packageManager.getHomeActivities(candidates)",
+              "candidates.filter(::isExternalLauncher).singleOrNull()",
+              "activity.packageName != packageName",
+              "startActivity(homeIntent)"
+          ]
+          if not all(x in s for x in checks):
+              raise SystemExit("El selector HOME robusto no superó sus comprobaciones.")
+          main_path.write_text(s)
+
+          b = build_path.read_text()
+          if "versionCode = 15" not in b or 'versionName = "1.1.4"' not in b:
+              raise SystemExit("La fuente no coincide con 1.1.4 / código 15.")
+          b = b.replace("versionCode = 15", "versionCode = 16", 1)
+          b = b.replace('versionName = "1.1.4"', 'versionName = "1.1.5"', 1)
+          build_path.write_text(b)
+          print("OK: HOME real identificado sin resolver al propio CREDIXCEL ni elegir entre launchers ambiguos; versión 1.1.5.")
+          PY
+
       - name: Verificar liberación transaccional antes de publicar
         shell: bash
         run: |
@@ -375,8 +447,8 @@ jobs:
               "cada fallo ejecuta rollback": all(x in main for x in ["if (!policiesReleased)", "if (!lockTaskStopped)", "if (!kioskCleared)", "if (!homeOpened)"]),
               "estado local se limpia al final": main.index("val homeOpened = openSystemHome()") < main.index("prefs.protectionActive = false"),
               "HOME externo termina la Activity": main.index("prefs.protectionActive = false") < main.index("finish()"),
-              "HOME usa launcher resuelto por Android": "packageManager.resolveActivity(" in main and "launcher.packageName == packageName" in main and "ResolverActivity" in main,
-              "versión 1.1.4 / código 15": 'versionName = "1.1.4"' in build and "versionCode = 15" in build,
+              "HOME se obtiene de candidatos reales de Android": "packageManager.getHomeActivities(candidates)" in main and "candidates.filter(::isExternalLauncher).singleOrNull()" in main and "activity.packageName != packageName" in main,
+              "versión 1.1.5 / código 16": 'versionName = "1.1.5"' in build and "versionCode = 16" in build,
           }
           for label, ok in checks.items():
               print(("OK: " if ok else "ERROR: ") + label)
@@ -387,7 +459,7 @@ jobs:
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.1.4
+          name: CREDIXCEL-Control-Fuente-1.1.5
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -427,12 +499,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.4.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.5.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.1.4-Release
+          name: CREDIXCEL-Control-1.1.5-Release
           path: CREDIXCEL-Control-1.1.4.apk
           if-no-files-found: error
           retention-days: 30
