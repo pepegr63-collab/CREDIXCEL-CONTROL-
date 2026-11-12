@@ -815,18 +815,20 @@ jobs:
               main = main.replace("        val policiesApplied = DeviceActions.applyFinancingProtection(this)",
                                   "        val policiesApplied = DeviceActions.applyFinancingProtection(this)\n        prefs.lockCommandReady = true", 1)
 
-          # Worker signals lock readiness only after all background policy and kiosk setup succeeded.
-          if 'prefs.lockCommandReady = true' not in worker:
-              worker = worker.replace('''                          device == "LOCKED" -> {
-                              // Persist the command''',
-                                      '''                          device == "LOCKED" -> {
-                              prefs.lockCommandReady = false
-                              // Persist the command''', 1)
-              worker = worker.replace('''                              if (!policies || !kiosk) return Result.retry()
-                              postActionNotification(''',
-                                      '''                              if (!policies || !kiosk) return Result.retry()
-                              prefs.lockCommandReady = true
-                              postActionNotification(''', 1)
+          # Worker publishes readiness only after DPM policies and kiosk setup have succeeded.
+          if "prefs.lockCommandReady = true" not in worker:
+              import re
+              worker, branch_count = re.subn(
+                  r'(device == "LOCKED"\\s*->\\s*\\{\\s*)',
+                  r'\\1prefs.lockCommandReady = false\\n                              ',
+                  worker, count=1
+              )
+              if branch_count != 1:
+                  raise SystemExit("No se encontró rama LOCKED en ServerSyncWorker.")
+              guard = "if (!policies || !kiosk) return Result.retry()"
+              if guard not in worker:
+                  raise SystemExit("No se encontró verificación de políticas/kiosco en Worker.")
+              worker = worker.replace(guard, guard + "\\n                              prefs.lockCommandReady = true", 1)
 
           # Bump the APK version exactly once.
           if 'versionName = "1.1.6"' not in build or "versionCode = 17" not in build:
