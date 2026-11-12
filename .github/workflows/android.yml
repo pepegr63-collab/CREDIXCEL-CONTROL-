@@ -1,13 +1,11 @@
 name: Compilar CREDIXCEL Control
-# Rebuild HOME persistente: script corregido para esta ejecución.
 
 on:
   workflow_dispatch:
   push:
     paths:
       - ".github/workflows/android.yml"
-      - ".github/scripts/configure_home.py"
-      - "CREDIXCEL-Control-fixed9-sin-bloqueos*.zip"
+      - "CREDIXCEL-Control-fixed10-sin-bloqueos.zip"
 
 jobs:
   build:
@@ -22,7 +20,7 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: Instalar Java
+      - name: Instalar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -31,495 +29,96 @@ jobs:
       - name: Instalar herramientas Android
         uses: android-actions/setup-android@v3
         with:
-          packages: "build-tools;35.0.0"
+          packages: "platforms;android-35,build-tools;35.0.0"
 
-      - name: Preparar Gradle
+      - name: Preparar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Extraer proyecto Android
+      - name: Extraer fuente 1.0.9
         shell: bash
         run: |
           set -euo pipefail
-          ZIP="$(find . -maxdepth 1 -type f -name 'CREDIXCEL-Control-fixed9-sin-bloqueos.zip' -print -quit)"
-          if [ -z "$ZIP" ]; then
-            echo "No se encontró el ZIP fixed9 en la raíz del repositorio."
-            ls -la
-            exit 1
-          fi
-          echo "ZIP encontrado: $ZIP"
+          ZIP="CREDIXCEL-Control-fixed10-sin-bloqueos.zip"
+          test -s "$ZIP" || { echo "No se encontró $ZIP en la raíz."; ls -la; exit 1; }
+          unzip -t "$ZIP"
           unzip -o "$ZIP" -d buildsrc
           PROJECT_DIR="$(find buildsrc -type f -path '*/CREDIXCEL-Control/android/app/build.gradle.kts' -print -quit | sed 's#/android/app/build.gradle.kts##')"
-          if [ -z "$PROJECT_DIR" ]; then
-            PROJECT_DIR="$(find buildsrc -type f -path '*/CREDIXCEL-Control/android/app/build.gradle' -print -quit | sed 's#/android/app/build.gradle##')"
-          fi
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "No se encontró el proyecto Android dentro del ZIP."
-            find buildsrc -maxdepth 8 -type f \( -name build.gradle -o -name build.gradle.kts \)
-            exit 1
-          fi
-          echo "Proyecto Android encontrado: $PROJECT_DIR"
+          test -n "$PROJECT_DIR" || { echo "No se encontró android/app/build.gradle.kts dentro del ZIP."; find buildsrc -maxdepth 8 -type f -name 'build.gradle*'; exit 1; }
+          echo "Proyecto detectado: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Aplicar modo de restricción administrada Lock Task
+      - name: Validar autorización doble para activar Lock Task
         shell: bash
         run: |
           set -euo pipefail
-          APP="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control"
-          DEVICE="$APP/device/DeviceActions.kt"
-          MAIN="$APP/MainActivity.kt"
-          test -f "$DEVICE" && test -f "$MAIN"
-          echo "=== Huella del ZIP realmente compilado ==="
-          sha256sum CREDIXCEL-Control-fixed9-sin-bloqueos.zip
-          python3 - "$DEVICE" "$MAIN" <<'PY'
-          import pathlib, re, sys, textwrap
-          device, main = map(pathlib.Path, sys.argv[1:])
-          d = device.read_text()
-          m = main.read_text()
-
-          if "fun enterManagedLock(" not in d:
-              method = """
-              /** Activa Lock Task administrado; mantiene menú de encendido y keyguard/emergencias. */
-              fun enterManagedLock(activity: android.app.Activity): Boolean {
-                  if (!isDeviceOwner(activity)) return false
-                  return try {
-                      val manager = dpm(activity)
-                      manager.setLockTaskPackages(admin(activity), arrayOf(activity.packageName))
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                          manager.setLockTaskFeatures(
-                              admin(activity),
-                              DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS or
-                                  DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD
-                          )
-                      }
-                      val state = activity.getSystemService(android.app.ActivityManager::class.java).lockTaskModeState
-                      if (state == android.app.ActivityManager.LOCK_TASK_MODE_NONE) activity.startLockTask()
-                      true
-                  } catch (_: Exception) { false }
-              }
-
-              /** Retira Lock Task cuando el servidor confirma ACTIVE. */
-              fun exitManagedLock(activity: android.app.Activity): Boolean {
-                  if (!isDeviceOwner(activity)) return false
-                  return try {
-                      val manager = dpm(activity)
-                      val state = activity.getSystemService(android.app.ActivityManager::class.java).lockTaskModeState
-                      if (state != android.app.ActivityManager.LOCK_TASK_MODE_NONE) activity.stopLockTask()
-                      manager.setLockTaskPackages(admin(activity), emptyArray())
-                      true
-                  } catch (_: Exception) { false }
-              }
-
-              """
-              method = textwrap.dedent(method)
-              if not re.search(r"^\s*fun lock\(context: Context\)", d, re.M):
-                  raise SystemExit("No se encontró función lock en DeviceActions.kt")
-              d = re.sub(r"(?=^\s*fun lock\(context: Context\))", method, d, count=1, flags=re.M)
-
-          if "var isRestricted by remember" not in m:
-              m, n = re.subn(r"(        var busy by remember \{\n            mutableStateOf\(false\)\n        \})",
-                             r"\1\n\n        var isRestricted by remember { mutableStateOf(false) }", m, count=1)
-              if n != 1: raise SystemExit("No se encontró estado busy en MainActivity.kt")
-
-          if "DISPOSITIVO RESTRINGIDO" not in m:
-              # Envuelve la pantalla principal en una rama restringida, sin depender de offsets de espacios.
-              column = r"(                Column\(\n                    Modifier\n                        \.fillMaxSize\(\)\n                        \.padding\(20\.dp\),\n                    verticalArrangement = Arrangement\.spacedBy\(10\.dp\)\n                \) \{)"
-              restricted = r'''\1
-                      if (isRestricted) {
-                          Text("CREDIXCEL Control", style = MaterialTheme.typography.headlineMedium)
-                          Text("DISPOSITIVO RESTRINGIDO", style = MaterialTheme.typography.headlineSmall)
-                          Text("El administrador ha aplicado una restricción al dispositivo.")
-                          Text("Las llamadas de emergencia y el menú de encendido permanecen disponibles.")
-                          Button(enabled = hasCredentials && !busy, onClick = {
-                              scope.launch {
-                                  busy = true
-                                  try {
-                                      val id = deviceId ?: prefs.deviceId ?: error("No hay ID de dispositivo")
-                                      val token = prefs.token ?: error("No hay credencial guardada")
-                                      val state = buildApi(server).sync(mapOf("deviceId" to id, "deviceToken" to token))
-                                      lastStatus = state.status
-                                      contractStatus = state.contractStatus
-                                      serverMessage = state.message.orEmpty()
-                                      if (state.status.equals("ACTIVE", true)) {
-                                          if (DeviceActions.exitManagedLock(this@MainActivity)) {
-                                              isRestricted = false
-                                              info = "Estado ACTIVE confirmado. Restricción administrada retirada."
-                                          } else info = "ACTIVE confirmado, pero Android no permitió retirar el modo administrado."
-                                      } else {
-                                          info = "El servidor aún no confirma ACTIVE. La restricción continúa."
-                                      }
-                                  } catch (e: Exception) {
-                                      info = "No se pudo consultar el servidor; se mantiene la restricción: ${e.localizedMessage ?: e.javaClass.simpleName}"
-                                  } finally { busy = false }
-                              }
-                          }, modifier = Modifier.fillMaxWidth()) {
-                              Text(if (busy) "Consultando…" else "Consultar estado para liberar")
-                          }
-                      } else {'''
-              m, n = re.subn(column, restricted, m, count=1)
-              if n != 1: raise SystemExit("No se encontró la apertura de Column en MainActivity.kt")
-              # Cierra el else justo antes del cierre de Column.
-              m, n = re.subn(r"(                    Text\(\n                        \"La sincronización consulta el estado del servidor\.[^\n]*\n                        style = MaterialTheme\.typography\.bodySmall\n                    \)\n)(                \})",
-                             r"\1                    }\n\2", m, count=1)
-              if n != 1: raise SystemExit("No se encontró el cierre de la pantalla principal")
-
-          # Sustituye el when completo para evitar depender de la indentación del ZIP.
-          pattern = r"                                    info = when \{.*?\n                                    \}"
-          replacement = '''                                    info = when {
-                                        state.status.equals("LOCKED", true) &&
-                                            state.contractStatus.equals("ACTIVE", true) -> {
-                                            if (DeviceActions.enterManagedLock(this@MainActivity)) {
-                                                isRestricted = true
-                                                "Orden LOCKED confirmada. Restricción administrada activada."
-                                            } else {
-                                                isRestricted = false
-                                                "Android no permitió activar el modo administrado. No se aplicó una restricción parcial."
-                                            }
-                                        }
-                                        state.status.equals("ACTIVE", true) -> {
-                                            if (DeviceActions.exitManagedLock(this@MainActivity)) {
-                                                isRestricted = false
-                                                "Estado ACTIVE confirmado. Restricción administrada retirada."
-                                            } else {
-                                                "ACTIVE confirmado, pero Android no permitió retirar el modo administrado."
-                                            }
-                                        }
-                                        state.status.equals("LOCKED", true) ->
-                                            "LOCKED recibido, pero el contrato no está ACTIVE. No se modificó la restricción."
-                                        else ->
-                                            "Estado recibido: ${state.status} / contrato ${state.contractStatus}. No se modificó la restricción."
-                                    }'''
-          m, n = re.subn(pattern, replacement, m, count=1, flags=re.S)
-          if n != 1: raise SystemExit("No se encontró el bloque info = when para sustituir")
-          d = d.replace("fun lock(context: Context): Boolean {", "fun lock(context: Context): Boolean {", 1)
-          device.write_text(d)
-          main.write_text(m)
-          print("Parche Lock Task aplicado; rama restringida y liberación al confirmar ACTIVE.")
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          test -f "$MAIN"
+          python3 - "$MAIN" <<'PY'
+          import pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          s = p.read_text()
+          old = 'device == "LOCKED" -> activateKiosk()'
+          new = '''device == "LOCKED" && contract == "ACTIVE" -> activateKiosk()
+                                          device == "LOCKED" -> "LOCKED recibido, pero el contrato no está ACTIVE. No se activa Lock Task."'''
+          if old not in s:
+              raise SystemExit("No se encontró exactamente la condición LOCKED esperada; se cancela para evitar un parche incorrecto.")
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          print("OK: Lock Task solo se activa con LOCKED + ACTIVE.")
           PY
-          grep -n -E 'enterManagedLock|exitManagedLock|DISPOSITIVO RESTRINGIDO|Estado ACTIVE confirmado' "$DEVICE" "$MAIN"
+          grep -n -A2 -B2 'device == "LOCKED"' "$MAIN"
 
-      - name: Publicar código fuente extraído para revisión
+      - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-Revision
+          name: CREDIXCEL-Control-Fuente-1.0.9
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
-            buildsrc/**/CREDIXCEL-Control/android/app/build.gradle*
-            buildsrc/**/CREDIXCEL-Control/build.gradle*
-            buildsrc/**/CREDIXCEL-Control/settings.gradle*
+            buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
+            buildsrc/**/CREDIXCEL-Control/build.gradle.kts
+            buildsrc/**/CREDIXCEL-Control/settings.gradle.kts
             buildsrc/**/CREDIXCEL-Control/gradle.properties
           if-no-files-found: error
           retention-days: 3
-
-      - name: Corregir versión de Android
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP_DIR="$PROJECT_DIR/android/app"
-          BUILD_FILE=""
-          for candidate in "$APP_DIR/build.gradle.kts" "$APP_DIR/build.gradle"; do
-            if [ -f "$candidate" ]; then BUILD_FILE="$candidate"; break; fi
-          done
-          if [ -z "$BUILD_FILE" ]; then
-            echo "No se encontró build.gradle(.kts) en $APP_DIR"
-            find buildsrc -maxdepth 7 -type f \( -name build.gradle -o -name build.gradle.kts \)
-            exit 1
-          fi
-          python3 - "$BUILD_FILE" <<'PY'
-          import pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          lines = p.read_text().splitlines()
-          code_hits = [i for i, line in enumerate(lines) if line.strip().startswith("versionCode")]
-          name_hits = [i for i, line in enumerate(lines) if line.strip().startswith("versionName")]
-          if len(code_hits) != 1 or len(name_hits) != 1:
-              raise SystemExit(f"No se pudo actualizar de forma segura: versionCode={len(code_hits)}, versionName={len(name_hits)}")
-          for i in code_hits:
-              indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
-              lines[i] = indent + "versionCode = 4"
-          for i in name_hits:
-              indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
-              lines[i] = indent + 'versionName = "1.0.3"'
-          p.write_text("\n".join(lines) + "\n")
-          print(f"Versión actualizada en {p}: versionCode=4, versionName=1.0.3")
-          PY
-
-      - name: Agregar sincronización automática al iniciar y periódica
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP="$PROJECT_DIR/android/app/src/main"
-          PKG="$APP/java/com/credixcel/control"
-          mkdir -p "$PKG/background"
-          cat > "$PKG/background/DeviceSyncWorker.kt" <<'KOTLIN'
-          package com.credixcel.control.background
-
-          import android.content.Context
-          import androidx.work.CoroutineWorker
-          import androidx.work.WorkerParameters
-          import com.credixcel.control.data.Prefs
-          import com.credixcel.control.device.DeviceActions
-          import com.credixcel.control.network.CredixcelApi
-          import kotlinx.coroutines.Dispatchers
-          import kotlinx.coroutines.withContext
-          import kotlinx.serialization.json.Json
-          import okhttp3.OkHttpClient
-          import okhttp3.MediaType.Companion.toMediaType
-          import retrofit2.Retrofit
-          import retrofit2.converter.kotlinx.serialization.asConverterFactory
-          import java.net.URL
-
-          class DeviceSyncWorker(context: Context, params: WorkerParameters) :
-              CoroutineWorker(context, params) {
-              override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-                  val prefs = Prefs(applicationContext)
-                  val id = prefs.deviceId
-                  val token = prefs.token
-                  if (id.isNullOrBlank() || token.isNullOrBlank()) return@withContext Result.success()
-
-                  try {
-                      val base = prefs.serverUrl.trim().trimEnd('/')
-                      require(base.startsWith("https://", true) && URL(base).host.isNotBlank())
-                      val json = Json { ignoreUnknownKeys = true }
-                      val api = Retrofit.Builder()
-                          .baseUrl("$base/")
-                          .client(OkHttpClient.Builder().build())
-                          .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-                          .build().create(CredixcelApi::class.java)
-
-                      val state = api.sync(mapOf("deviceId" to id, "deviceToken" to token))
-                      when {
-                          state.status.equals("LOCKED", true) &&
-                              state.contractStatus.equals("ACTIVE", true) -> {
-                              prefs.isRestricted = DeviceActions.updateManagedLockAllowlist(applicationContext, true)
-                          }
-                          state.status.equals("ACTIVE", true) &&
-                              state.contractStatus.equals("ACTIVE", true) -> {
-                              DeviceActions.updateManagedLockAllowlist(applicationContext, false)
-                              prefs.isRestricted = false
-                          }
-                      }
-                      prefs.lastSyncStatus = state.status
-                      prefs.lastSyncMessage = state.message.orEmpty()
-                      Result.success()
-                  } catch (_: Exception) {
-                      Result.retry()
-                  }
-              }
-          }
-          KOTLIN
-
-          cat > "$PKG/background/WorkScheduler.kt" <<'KOTLIN'
-          package com.credixcel.control.background
-
-          import android.content.Context
-          import androidx.work.Constraints
-          import androidx.work.ExistingPeriodicWorkPolicy
-          import androidx.work.ExistingWorkPolicy
-          import androidx.work.NetworkType
-          import androidx.work.OneTimeWorkRequestBuilder
-          import androidx.work.PeriodicWorkRequestBuilder
-          import androidx.work.WorkManager
-          import java.util.concurrent.TimeUnit
-
-          object WorkScheduler {
-              private const val PERIODIC_NAME = "credixcel-periodic-device-sync"
-              private const val BOOT_NAME = "credixcel-boot-device-sync"
-
-              fun schedule(context: Context) {
-                  val constraints = Constraints.Builder()
-                      .setRequiredNetworkType(NetworkType.CONNECTED)
-                      .build()
-                  val periodic = PeriodicWorkRequestBuilder<DeviceSyncWorker>(15, TimeUnit.MINUTES)
-                      .setConstraints(constraints)
-                      .build()
-                  WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                      PERIODIC_NAME, ExistingPeriodicWorkPolicy.UPDATE, periodic
-                  )
-              }
-
-              fun runNow(context: Context) {
-                  val constraints = Constraints.Builder()
-                      .setRequiredNetworkType(NetworkType.CONNECTED)
-                      .build()
-                  val request = OneTimeWorkRequestBuilder<DeviceSyncWorker>()
-                      .setConstraints(constraints)
-                      .build()
-                  WorkManager.getInstance(context).enqueueUniqueWork(
-                      BOOT_NAME, ExistingWorkPolicy.REPLACE, request
-                  )
-                  schedule(context)
-              }
-          }
-          KOTLIN
-
-          cat > "$PKG/background/BootReceiver.kt" <<'KOTLIN'
-          package com.credixcel.control.background
-
-          import android.content.BroadcastReceiver
-          import android.content.Context
-          import android.content.Intent
-
-          class BootReceiver : BroadcastReceiver() {
-              override fun onReceive(context: Context, intent: Intent?) {
-                  if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
-                      WorkScheduler.runNow(context)
-                  }
-              }
-          }
-          KOTLIN
-
-          python3 - "$APP/AndroidManifest.xml" "$PKG/data/Prefs.kt" "$PKG/device/DeviceActions.kt" "$PKG/MainActivity.kt" <<'PY'
-          import pathlib, sys
-          manifest, prefs, device, main = map(pathlib.Path, sys.argv[1:])
-          m = manifest.read_text()
-          if 'android.permission.RECEIVE_BOOT_COMPLETED' not in m:
-              m = m.replace('<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />',
-                            '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />')
-          if '.background.BootReceiver' not in m:
-              m = m.replace('    </application>', '''        <receiver
-              android:name=".background.BootReceiver"
-              android:enabled="true"
-              android:exported="true">
-              <intent-filter>
-                  <action android:name="android.intent.action.BOOT_COMPLETED" />
-              </intent-filter>
-          </receiver>
-          </application>''')
-          manifest.write_text(m)
-
-          p = prefs.read_text()
-          if 'var isRestricted:' not in p:
-              p += '''
-          \n    var isRestricted: Boolean
-              get() = p.getBoolean("is_restricted", false)
-              set(value) { p.edit().putBoolean("is_restricted", value).apply() }
-
-              var lastSyncStatus: String?
-                  get() = p.getString("last_sync_status", null)
-                  set(value) { p.edit().putString("last_sync_status", value).apply() }
-
-              var lastSyncMessage: String
-                  get() = p.getString("last_sync_message", "") ?: ""
-                  set(value) { p.edit().putString("last_sync_message", value).apply() }
-          }
-          '''
-              # The original class already ends with }, so remove that ending before appending properties.
-              p = prefs.read_text().rstrip()
-              if not p.endswith('}'): raise SystemExit("Prefs.kt no termina como se esperaba")
-              p = p[:-1] + '''
-              var isRestricted: Boolean
-                  get() = p.getBoolean("is_restricted", false)
-                  set(value) { p.edit().putBoolean("is_restricted", value).apply() }
-
-              var lastSyncStatus: String?
-                  get() = p.getString("last_sync_status", null)
-                  set(value) { p.edit().putString("last_sync_status", value).apply() }
-
-              var lastSyncMessage: String
-                  get() = p.getString("last_sync_message", "") ?: ""
-                  set(value) { p.edit().putString("last_sync_message", value).apply() }
-          }
-          '''
-              prefs.write_text(p)
-
-          d = device.read_text()
-          if 'fun updateManagedLockAllowlist(' not in d:
-              helper = '''
-              /** Actualiza la lista de Lock Task desde el worker; no inicia una Activity en segundo plano. */
-              fun updateManagedLockAllowlist(context: Context, locked: Boolean): Boolean {
-                  if (!isDeviceOwner(context)) return false
-                  return try {
-                      val manager = dpm(context)
-                      if (locked) {
-                          manager.setLockTaskPackages(admin(context), arrayOf(context.packageName))
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                              manager.setLockTaskFeatures(
-                                  admin(context),
-                                  DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS or
-                                      DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD
-                              )
-                          }
-                      } else {
-                          manager.setLockTaskPackages(admin(context), emptyArray())
-                      }
-                      true
-                  } catch (_: Exception) { false }
-              }
-
-          '''
-              needle = '    fun lock(context: Context): Boolean {'
-              if needle not in d: raise SystemExit("No se encontró punto de inserción en DeviceActions.kt")
-              d = d.replace(needle, helper + needle, 1)
-              device.write_text(d)
-
-          a = main.read_text()
-          a = a.replace('var isRestricted by remember { mutableStateOf(false) }',
-                        'var isRestricted by remember { mutableStateOf(prefs.isRestricted) }')
-          if "window.decorView.post" not in a:
-              a = a.replace('        setContent {\n            App(prefs)\n        }',
-                            '        setContent {\n            App(prefs)\n        }\n        if (prefs.isRestricted && DeviceActions.isDeviceOwner(this)) {\n            window.decorView.post { DeviceActions.enterManagedLock(this) }\n        }')
-          if 'WorkScheduler.runNow(this@MainActivity)' not in a:
-              a = a.replace('        val prefs = Prefs(this)\n',
-                            '        val prefs = Prefs(this)\n        com.credixcel.control.background.WorkScheduler.runNow(this)\n')
-          main.write_text(a)
-
-          b = pathlib.Path(sys.argv[1]).parents[0]
-          build = b.parent.parent / "build.gradle.kts"
-          if not build.exists(): build = b.parent.parent / "build.gradle"
-          if not build.exists(): raise SystemExit("No se encontró archivo Gradle para versionar")
-          s = build.read_text()
-          import re
-          s, n1 = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>5', s, count=1)
-          s, n2 = re.subn(r'(?m)^(\s*versionName\s*=\s*)"[^"]+"', r'\g<1>"1.0.4"', s, count=1)
-          if n1 != 1 or n2 != 1: raise SystemExit(f"No se pudo versionar: code={n1}, name={n2}")
-          build.write_text(s)
-          print("Sincronización automática instalada; versión 1.0.4 (code 5).")
-          PY
-          grep -n -E 'BootReceiver|RECEIVE_BOOT_COMPLETED' "$APP/AndroidManifest.xml"
-          grep -n -E 'updateManagedLockAllowlist|isRestricted|lastSyncStatus' "$PKG/device/DeviceActions.kt" "$PKG/data/Prefs.kt" "$PKG/MainActivity.kt"
-      - name: Configurar arranque HOME persistente y sincronización al abrir
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 .github/scripts/configure_home.py "$PROJECT_DIR"
-          grep -n -E 'android.intent.category.HOME|android.intent.category.DEFAULT' "$PROJECT_DIR/android/app/src/main/AndroidManifest.xml"
-          grep -n -E 'addPersistentPreferredActivity|clearPackagePersistentPreferredActivities|updateManagedLockAllowlist' "$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/device/DeviceActions.kt"
-          grep -n -E 'LaunchedEffect\(hasCredentials\)|prefs.isRestricted' "$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
 
       - name: Preparar firma
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "Falta el secreto ANDROID_KEYSTORE_BASE64."; exit 1; }
           mkdir -p "$RUNNER_TEMP/credixcel-signing"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
           test -s "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/credixcel-signing/credixcel-release.jks" >> "$GITHUB_ENV"
 
-      - name: Compilar APK
-        run: |
-          cd "$PROJECT_DIR"
-          gradle :android:app:assembleRelease --no-daemon
-
-      - name: Verificar APK
+      - name: Compilar APK Release
         shell: bash
         run: |
           set -euo pipefail
-          APK="$(find "$PROJECT_DIR/android/app/build/outputs/apk/release" -maxdepth 1 -name '*.apk' -print -quit)"
-          test -n "$APK"
+          cd "$PROJECT_DIR"
+          gradle :android:app:assembleRelease --no-daemon
+
+      - name: Verificar firma y versión
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find "$PROJECT_DIR/android/app/build/outputs/apk/release" -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$APK" || { echo "No se generó APK Release."; exit 1; }
           echo "APK generado: $APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           APKANALYZER="$(find "$ANDROID_HOME" -type f -name apkanalyzer -print -quit)"
           test -n "$APKANALYZER"
-          "$APKANALYZER" manifest print "$APK" > manifest.txt
-          echo "=== Manifiesto ==="
-          cat manifest.txt
+          "$APKANALYZER" manifest version-code "$APK"
+          "$APKANALYZER" manifest version-name "$APK"
+          "$APKANALYZER" manifest application-id "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.0.9.apk"
 
-      - name: Guardar APK y manifiesto
+      - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Release
-          path: |
-            buildsrc/**/CREDIXCEL-Control/android/app/build/outputs/apk/release/*.apk
-            manifest.txt
+          name: CREDIXCEL-Control-1.0.9-Release
+          path: CREDIXCEL-Control-1.0.9.apk
           if-no-files-found: error
+          retention-days: 30
