@@ -878,22 +878,22 @@ jobs:
           if "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" not in main:
               main = main.replace(anchor, guard, 1)
           old_else = '                                        else -> if (prefs.protectionActive) {'
-          new_else = '                                        else -> {\\n                                            prefs.pendingRelease = false\\n                                            if (prefs.protectionActive) {'
+          new_else = '                                        else -> {\n                                            prefs.pendingRelease = false\n                                            if (prefs.protectionActive) {'
           if old_else not in main: raise SystemExit("No se encontró rama manual incierta.")
           main = main.replace(old_else, new_else, 1)
           # Close the new else block after the existing if/else expression.
-          close_old = '                                        }\\n                                    }\\n                                } catch (e: Exception) {'
-          close_new = '                                            }\\n                                        }\\n                                    }\\n                                } catch (e: Exception) {'
+          close_old = '                                        }\n                                    }\n                                } catch (e: Exception) {'
+          close_new = '                                            }\n                                        }\n                                    }\n                                } catch (e: Exception) {'
           if close_old not in main: raise SystemExit("No se encontró cierre de rama manual.")
           main = main.replace(close_old, close_new, 1)
-          old_catch = '                                } catch (e: Exception) {\\n                                    // Network/authentication failures never clear a previously authorized local restriction.'
-          new_catch = '                                } catch (e: Exception) {\\n                                    prefs.pendingRelease = false\\n                                    // Network/authentication failures never clear a previously authorized local restriction.'
+          old_catch = '                                } catch (e: Exception) {\n                                    // Network/authentication failures never clear a previously authorized local restriction.'
+          new_catch = '                                } catch (e: Exception) {\n                                    prefs.pendingRelease = false\n                                    // Network/authentication failures never clear a previously authorized local restriction.'
           if old_catch not in main: raise SystemExit("No se encontró catch manual.")
           main = main.replace(old_catch, new_catch, 1)
           if "else -> Unit" not in worker: raise SystemExit("No se encontró else -> Unit.")
-          worker = worker.replace("else -> Unit", "else -> {\\n                    prefs.pendingRelease = false\\n                }", 1)
-          old_wc = '        } catch (_: Exception) {\\n            Result.retry()'
-          new_wc = '        } catch (_: Exception) {\\n            prefs.pendingRelease = false\\n            Result.retry()'
+          worker = worker.replace("else -> Unit", "else -> {\n                    prefs.pendingRelease = false\n                }", 1)
+          old_wc = '        } catch (_: Exception) {\n            Result.retry()'
+          new_wc = '        } catch (_: Exception) {\n            prefs.pendingRelease = false\n            Result.retry()'
           if old_wc not in worker: raise SystemExit("No se encontró catch Worker.")
           worker = worker.replace(old_wc, new_wc, 1)
           if 'versionName = "1.1.7"' not in build or "versionCode = 18" not in build:
