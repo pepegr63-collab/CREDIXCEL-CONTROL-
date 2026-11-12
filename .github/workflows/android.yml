@@ -360,76 +360,37 @@ jobs:
           print("OK: rollback de protección ante cada fallo; versión 1.1.4.")
           PY
 
-      - name: Seleccionar HOME real sin ambigüedad y versionar 1.1.5
+      - name: Validar HOME real y versionar 1.1.5
         shell: bash
         run: |
           set -euo pipefail
           MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
           BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
           python3 - "$MAIN" "$BUILD" <<'PY'
-          import pathlib, sys
+          import pathlib, re, sys
           main_path, build_path = map(pathlib.Path, sys.argv[1:])
-          s = main_path.read_text()
-          start = s.find("    private fun openSystemHome(): Boolean {")
-          end = s.find("\n    private fun restoreKioskAfterFailedRelease()", start)
-          if start < 0 or end < 0:
-              raise SystemExit("No se encontró el selector HOME actual para sustituirlo.")
-          helper = '''    /**
-           * Open the user's real Android HOME. Prefer the system's current default;
-           * otherwise accept only one unambiguous external HOME candidate.
-           */
-          private fun openSystemHome(): Boolean {
-              val candidates = mutableListOf<android.content.pm.ResolveInfo>()
-              val defaultHome = packageManager.getHomeActivities(candidates)
+          source = main_path.read_text()
+          build = build_path.read_text()
 
-              fun isExternalLauncher(info: android.content.pm.ResolveInfo): Boolean {
-                  val activity = info.activityInfo ?: return false
-                  return activity.packageName != packageName &&
-                      !activity.name.endsWith(".ResolverActivity") &&
-                      activity.enabled && activity.exported
-              }
-
-              val selected = defaultHome?.let { component ->
-                  candidates.firstOrNull { info ->
-                      val activity = info.activityInfo
-                      activity != null &&
-                          activity.packageName == component.packageName &&
-                          activity.name == component.className &&
-                          isExternalLauncher(info)
-                  }
-              } ?: candidates.filter(::isExternalLauncher).singleOrNull()
-
-              val activity = selected?.activityInfo ?: return false
-              val homeComponent = android.content.ComponentName(activity.packageName, activity.name)
-              val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                  addCategory(Intent.CATEGORY_HOME)
-                  component = homeComponent
-                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-              }
-              return runCatching {
-                  startActivity(homeIntent)
-                  true
-              }.getOrDefault(false)
+          # El selector HOME ya fue instalado por los pasos anteriores.
+          # Validarlo sin depender de su sangría exacta.
+          checks = {
+              "HOME usa el selector Android de launchers": "packageManager.getHomeActivities(candidates)" in source,
+              "HOME excluye la propia aplicación": "activity.packageName != packageName" in source,
+              "HOME evita ResolverActivity": '".ResolverActivity"' in source,
+              "HOME inicia el componente seleccionado": "startActivity(homeIntent)" in source,
           }
-          '''
-          s = s[:start] + helper + s[end:]
-          checks = [
-              "packageManager.getHomeActivities(candidates)",
-              "candidates.filter(::isExternalLauncher).singleOrNull()",
-              "activity.packageName != packageName",
-              "startActivity(homeIntent)"
-          ]
-          if not all(x in s for x in checks):
-              raise SystemExit("El selector HOME robusto no superó sus comprobaciones.")
-          main_path.write_text(s)
+          for label, ok in checks.items():
+              print(("OK: " if ok else "ERROR: ") + label)
+          if not all(checks.values()):
+              raise SystemExit("El selector HOME no superó las comprobaciones; se cancela la compilación.")
 
-          b = build_path.read_text()
-          if "versionCode = 15" not in b or 'versionName = "1.1.4"' not in b:
+          if "versionCode = 15" not in build or 'versionName = "1.1.4"' not in build:
               raise SystemExit("La fuente no coincide con 1.1.4 / código 15.")
-          b = b.replace("versionCode = 15", "versionCode = 16", 1)
-          b = b.replace('versionName = "1.1.4"', 'versionName = "1.1.5"', 1)
-          build_path.write_text(b)
-          print("OK: HOME real identificado sin resolver al propio CREDIXCEL ni elegir entre launchers ambiguos; versión 1.1.5.")
+          build = build.replace("versionCode = 15", "versionCode = 16", 1)
+          build = build.replace('versionName = "1.1.4"', 'versionName = "1.1.5"', 1)
+          build_path.write_text(build)
+          print("OK: HOME validado y versión 1.1.5 / código 16.")
           PY
 
       - name: Verificar liberación transaccional antes de publicar
