@@ -417,7 +417,7 @@ jobs:
               raise SystemExit("La validación de liberación transaccional falló.")
           PY
 
-      - name: Incorporar sincronización automática segura y versionar 1.1.6
+      - name: Incorporar sincronización automática segura y versionar 1.1.7
         shell: bash
         run: |
           set -euo pipefail
@@ -676,8 +676,8 @@ jobs:
 
           if "versionCode = 16" not in build or 'versionName = "1.1.5"' not in build:
               raise SystemExit("La fuente no coincide con 1.1.5 antes del versionado.")
-          build = build.replace("versionCode = 16", "versionCode = 17", 1)
-          build = build.replace('versionName = "1.1.5"', 'versionName = "1.1.6"', 1)
+          build = build.replace("versionCode = 16", "versionCode = 18", 1)
+          build = build.replace('versionName = "1.1.5"', 'versionName = "1.1.7"', 1)
 
           # Assertions validate the actual patched files.
           assert "PeriodicWorkRequestBuilder<ServerSyncWorker>(15, TimeUnit.MINUTES)" in main
@@ -687,13 +687,171 @@ jobs:
           assert "var pendingRelease: Boolean" in prefs
           assert 'device == "ACTIVE" && contract == "ACTIVE"' in pathlib.Path(sys.argv[1]).read_text()
           assert "POST_NOTIFICATIONS" in manifest
-          assert 'versionName = "1.1.6"' in build and "versionCode = 17" in build
+          assert 'versionName = "1.1.7"' in build and "versionCode = 18" in build
 
           main_path.write_text(main)
           prefs_path.write_text(prefs)
           manifest_path.write_text(manifest)
           build_path.write_text(build)
-          print("OK: sincronización periódica, comandos durables y liberación solo en Activity visible; versión 1.1.6.")
+          print("OK: sincronización periódica, comandos durables y liberación solo en Activity visible; versión 1.1.7.")
+          PY
+
+      - name: Corregir permisos y reacción inmediata a comandos del servidor; versionar 1.1.7
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          PREFS="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/data/Prefs.kt"
+          WORKER="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/sync/ServerSyncWorker.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$PREFS" "$WORKER" "$BUILD" <<'PY'
+          import pathlib, sys
+          main_path, prefs_path, worker_path, build_path = map(pathlib.Path, sys.argv[1:])
+          main, prefs, worker, build = [p.read_text() for p in (main_path, prefs_path, worker_path, build_path)]
+
+          # SharedPreferences listener accessors and durable worker completion marker.
+          if "fun addChangeListener(" not in prefs:
+              prefs = prefs.replace("import android.content.Context", "import android.content.Context\nimport android.content.SharedPreferences", 1)
+              anchor = '    var lastContractStatus: String?'
+              if anchor not in prefs: raise SystemExit("No se encontró punto de inserción de Prefs.")
+              prefs = prefs.replace(anchor, '''    var lockCommandReady: Boolean
+                  get() = p.getBoolean("lock_command_ready", false)
+                  set(value) { p.edit().putBoolean("lock_command_ready", value).commit() }
+
+              var notificationPermissionAsked: Boolean
+                  get() = p.getBoolean("notification_permission_asked", false)
+                  set(value) { p.edit().putBoolean("notification_permission_asked", value).commit() }
+
+              fun addChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+                  p.registerOnSharedPreferenceChangeListener(listener)
+              }
+
+              fun removeChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+                  p.unregisterOnSharedPreferenceChangeListener(listener)
+              }
+
+          ''' + anchor, 1)
+
+          # Runtime notification permission on Android 13+; ask once, never loop on denial.
+          imports = [
+              "import android.Manifest",
+              "import android.content.pm.PackageManager",
+              "import android.os.Build",
+              "import androidx.activity.result.contract.ActivityResultContracts",
+              "import androidx.core.content.ContextCompat",
+              "import android.content.SharedPreferences",
+              "import androidx.lifecycle.Lifecycle",
+          ]
+          for item in imports:
+              if item not in main:
+                  main = main.replace("import android.app.ActivityManager", "import android.app.ActivityManager\n" + item, 1)
+          class_anchor = "class MainActivity : ComponentActivity() {"
+          permission_block = '''class MainActivity : ComponentActivity() {
+              private val notificationPermissionLauncher =
+                  registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+              private val prefsChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                  if (key == "pending_release" || key == "lock_command_ready") {
+                      runOnUiThread {
+                          if (!::prefs.isInitialized ||
+                              !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) ||
+                              isFinishing || isDestroyed) return@runOnUiThread
+                          if (prefs.pendingRelease) {
+                              val message = releaseKiosk()
+                              if (prefs.pendingRelease) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                          } else if (prefs.protectionActive && prefs.lockCommandReady) {
+                              enterLockTaskIfAuthorized()
+                          }
+                      }
+                  }
+              }
+          '''
+          if "private val notificationPermissionLauncher" not in main:
+              if class_anchor not in main: raise SystemExit("No se encontró clase MainActivity.")
+              main = main.replace(class_anchor, permission_block, 1)
+
+          # Add permission request once after the activity is initialized.
+          if "requestNotificationPermissionOnce()" not in main:
+              main = main.replace("        scheduleServerSync()\n        setContent { App(prefs) }",
+                                  "        scheduleServerSync()\n        requestNotificationPermissionOnce()\n        setContent { App(prefs) }", 1)
+              anchor = "    /** WorkManager checks the server at Android's minimum periodic interval (15 minutes). */"
+              methods = '''    private fun requestNotificationPermissionOnce() {
+                  if (Build.VERSION.SDK_INT < 33 || prefs.notificationPermissionAsked) return
+                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                      PackageManager.PERMISSION_GRANTED) return
+                  prefs.notificationPermissionAsked = true
+                  notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+              }
+
+              private fun enterLockTaskIfAuthorized() {
+                  if (!DeviceActions.isDeviceOwner(this)) return
+                  if (!DeviceActions.configureKiosk(this) || !DeviceActions.isLockTaskPermitted(this)) return
+                  val manager = getSystemService(ActivityManager::class.java)
+                  if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
+                      runCatching { startLockTask() }
+                  }
+              }
+
+          '''
+              if anchor not in main: raise SystemExit("No se encontró zona para métodos de permisos.")
+              main = main.replace(anchor, methods + anchor, 1)
+
+          # Listen only while the Activity is resumed. Re-read durable command state on resume.
+          if "prefs.addChangeListener(prefsChangeListener)" not in main:
+              main = main.replace("        super.onResume()\n        if (!::prefs.isInitialized) return",
+                                  "        super.onResume()\n        if (!::prefs.isInitialized) return\n        prefs.addChangeListener(prefsChangeListener)", 1)
+          if "override fun onPause()" not in main:
+              anchor = "    private fun activateKiosk(): String {"
+              pause = '''    override fun onPause() {
+                  if (::prefs.isInitialized) prefs.removeChangeListener(prefsChangeListener)
+                  super.onPause()
+              }
+
+          '''
+              if anchor not in main: raise SystemExit("No se encontró punto para onPause.")
+              main = main.replace(anchor, pause + anchor, 1)
+
+          # Manual activation records that the kiosk setup is complete.
+          if "prefs.lockCommandReady = true" not in main:
+              main = main.replace("        val policiesApplied = DeviceActions.applyFinancingProtection(this)",
+                                  "        val policiesApplied = DeviceActions.applyFinancingProtection(this)\n        prefs.lockCommandReady = true", 1)
+
+          # Worker signals lock readiness only after all background policy and kiosk setup succeeded.
+          if 'prefs.lockCommandReady = true' not in worker:
+              worker = worker.replace('''                          device == "LOCKED" -> {
+                              // Persist the command''',
+                                      '''                          device == "LOCKED" -> {
+                              prefs.lockCommandReady = false
+                              // Persist the command''', 1)
+              worker = worker.replace('''                              if (!policies || !kiosk) return Result.retry()
+                              postActionNotification(''',
+                                      '''                              if (!policies || !kiosk) return Result.retry()
+                              prefs.lockCommandReady = true
+                              postActionNotification(''', 1)
+
+          # Bump the APK version exactly once.
+          if 'versionName = "1.1.7"' not in build or "versionCode = 18" not in build:
+              raise SystemExit("La fuente no coincide con 1.1.7 / código 17.")
+          build = build.replace("versionCode = 18", "versionCode = 18", 1)
+          build = build.replace('versionName = "1.1.7"', 'versionName = "1.1.7"', 1)
+
+          # Assertions guard against silently incomplete patching.
+          required = [
+              "notificationPermissionLauncher", "requestNotificationPermissionOnce()",
+              "prefs.addChangeListener(prefsChangeListener)", "prefs.removeChangeListener(prefsChangeListener)",
+              "enterLockTaskIfAuthorized()", "prefs.lockCommandReady = true",
+          ]
+          for token in required:
+              if token not in main: raise SystemExit("Falta en MainActivity: " + token)
+          for token in ["lock_command_ready", "addChangeListener", "removeChangeListener"]:
+              if token not in prefs: raise SystemExit("Falta en Prefs: " + token)
+          if "prefs.lockCommandReady = true" not in worker:
+              raise SystemExit("Worker no publica señal de bloqueo listo.")
+          if 'versionName = "1.1.7"' not in build or "versionCode = 18" not in build:
+              raise SystemExit("Versionado 1.1.7 no aplicado.")
+
+          main_path.write_text(main); prefs_path.write_text(prefs)
+          worker_path.write_text(worker); build_path.write_text(build)
+          print("OK: permiso de notificaciones Android 13+, listener de comandos en Activity visible, señal de bloqueo listo y versión 1.1.7.")
           PY
 
       - name: Validar sincronización automática antes de publicar
@@ -717,7 +875,7 @@ jobs:
               "Worker no intenta detener Lock Task en segundo plano": "stopLockTask()" not in worker,
               "Activity visible completa la liberación": "if (prefs.pendingRelease)" in main and "releaseKiosk()" in main,
               "fallos de red reintentan sin liberar": "Result.retry()" in worker,
-              "versión 1.1.6 / código 17": 'versionName = "1.1.6"' in build and "versionCode = 17" in build,
+              "versión 1.1.7 / código 17": 'versionName = "1.1.7"' in build and "versionCode = 18" in build,
           }
           for label, ok in checks.items():
               print(("OK: " if ok else "ERROR: ") + label)
@@ -728,7 +886,7 @@ jobs:
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.1.6
+          name: CREDIXCEL-Control-Fuente-1.1.7
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -768,12 +926,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.6.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.7.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.1.6-Release
-          path: CREDIXCEL-Control-1.1.6.apk
+          name: CREDIXCEL-Control-1.1.7-Release
+          path: CREDIXCEL-Control-1.1.7.apk
           if-no-files-found: error
           retention-days: 30
