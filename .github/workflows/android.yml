@@ -121,9 +121,7 @@ jobs:
                   android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
               )
               val launcher = candidates
-                  .filter { it.activityInfo.packageName != this.packageName }
-                  
-                  .firstOrNull()
+                  .firstOrNull { it.activityInfo.packageName != this.packageName }
                   ?.activityInfo ?: return false
               val component = android.content.ComponentName(launcher.packageName, launcher.name)
 
