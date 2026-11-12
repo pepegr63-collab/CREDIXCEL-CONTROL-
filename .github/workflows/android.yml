@@ -967,9 +967,9 @@ jobs:
 
           import re
           manual_pattern = re.compile(
-              r'(?m)^([ \\t]*)prefs\\.lastDeviceStatus = device[^\\n]*\\n'
-              r'[ \\t]*prefs\\.lastContractStatus = contract[^\\n]*\\n'
-              r'([ \\t]*)serverMessage = [^\\n]*'
+              r'(?m)^([ \t]*)prefs\.lastDeviceStatus = device[^\n]*\n'
+              r'[ \t]*prefs\.lastContractStatus = contract[^\n]*\n'
+              r'([ \t]*)serverMessage = [^\n]*'
           )
           manual_match = manual_pattern.search(main)
           if not manual_match:
@@ -978,8 +978,8 @@ jobs:
           indent = manual_match.group(2)
           manual_replacement = manual_block.replace(
               "serverMessage = ",
-              'prefs.releaseAuthorizationAt =\\n' + indent +
-              '    if (device == "ACTIVE" && contract == "ACTIVE") System.currentTimeMillis() else 0L\\n' +
+              'prefs.releaseAuthorizationAt =\n' + indent +
+              '    if (device == "ACTIVE" && contract == "ACTIVE") System.currentTimeMillis() else 0L\n' +
               indent + "serverMessage = ",
               1
           )
