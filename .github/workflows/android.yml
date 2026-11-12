@@ -1027,7 +1027,7 @@ jobs:
           method_signature = "private fun enterLockTaskIfAuthorized()"
           method_start = main.find(method_signature)
           if method_start < 0: raise SystemExit("No se encontró la firma enterLockTaskIfAuthorized.")
-          method_line_start = main.rfind("\\n", 0, method_start) + 1
+          method_line_start = main.rfind("\n", 0, method_start) + 1
           method_open = main.find("{", method_start)
           if method_open < 0: raise SystemExit("Método enterLockTaskIfAuthorized sin apertura.")
           depth = 0
