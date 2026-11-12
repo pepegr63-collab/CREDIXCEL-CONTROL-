@@ -122,7 +122,7 @@ jobs:
               )
               val launcher = candidates
                   .filter { it.activityInfo.packageName != this.packageName }
-                  .sortedByDescending { it.isDefault }
+                  
                   .firstOrNull()
                   ?.activityInfo ?: return false
               val component = android.content.ComponentName(launcher.packageName, launcher.name)
@@ -185,21 +185,9 @@ jobs:
           if old not in s:
               raise SystemExit("No se encontró el bloque de confirmación de liberación esperado.")
           s = s.replace(old, new, 1)
-          old_home = """                  val launcher = candidates
-                      .filter { it.activityInfo.packageName != this.packageName }
-                      .sortedByDescending { it.isDefault }
-                      .firstOrNull()
-                      ?.activityInfo ?: return false
-          """
-          new_home = """                  // PackageManager already orders matching HOME handlers by resolution priority.
-                  // Keep the first external launcher; ResolveInfo.isDefault is not the selected HOME app.
-                  val launcher = candidates
-                      .firstOrNull { it.activityInfo.packageName != this.packageName }
-                      ?.activityInfo ?: return false
-          """
-          if old_home not in s:
-              raise SystemExit("No se encontró el selector HOME esperado.")
-          s = s.replace(old_home, new_home, 1)
+          # Verify the selector patched in the preceding step without brittle indentation matching.
+          if 'firstOrNull { it.activityInfo.packageName != this.packageName }' not in s:
+              raise SystemExit("No se encontró el selector HOME externo después del parche.")
           old_active = 'device == "ACTIVE" && contract == "ACTIVE" -> releaseKiosk()'
           new_active = '''device == "ACTIVE" && contract == "ACTIVE" -> {
                                               val manager = getSystemService(ActivityManager::class.java)
