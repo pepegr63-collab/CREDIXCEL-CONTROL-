@@ -127,6 +127,17 @@ if 'LaunchedEffect(hasCredentials)' not in a:
     a = a.replace(anchor, anchor + effect, 1)
 a = a.replace('                                      prefs.isRestricted = false\n                                      prefs.isRestricted = false\n                                      isRestricted = false\n',
               '                                      prefs.isRestricted = false\n                                      isRestricted = false\n')
+lines = a.splitlines()
+out = []
+for line in lines:
+    stripped = line.strip()
+    if stripped in ("isRestricted = true", "isRestricted = false"):
+        indent = line[:len(line) - len(line.lstrip())]
+        persisted = "prefs." + stripped
+        if not out or out[-1].strip() != persisted:
+            out.append(indent + persisted)
+    out.append(line)
+a = "\n".join(out) + "\n"
 main.write_text(a)
 
 b = build.read_text()
