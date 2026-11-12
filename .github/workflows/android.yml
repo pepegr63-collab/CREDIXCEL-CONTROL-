@@ -927,7 +927,8 @@ jobs:
               "LOCKED conserva y configura protección": 'device == "LOCKED"' in worker and "prefs.protectionActive = true" in worker and "configureKiosk" in worker,
               "Worker no intenta detener Lock Task en segundo plano": "stopLockTask()" not in worker,
               "Activity visible completa la liberación": "if (prefs.pendingRelease)" in main and "releaseKiosk()" in main,
-              "fallos de red invalidan liberación pendiente y reintentan": "Result.retry()" in worker and "prefs.pendingRelease = false" in worker,\n              "estado incierto invalida liberación pendiente": "else -> {" in worker and "prefs.pendingRelease = false" in worker,\n              "liberación valida los dos estados guardados": "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" in main,
+              "fallos de red invalidan liberación pendiente y reintentan": "Result.retry()" in worker and "prefs.pendingRelease = false" in worker,
+              "estado incierto invalida liberación pendiente": "else -> {" in worker and "prefs.pendingRelease = false" in worker,\n              "liberación valida los dos estados guardados": "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" in main,
               "versión 1.1.8 / código 19": 'versionName = "1.1.8"' in build and "versionCode = 19" in build,
           }
           for label, ok in checks.items():
@@ -985,6 +986,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CREDIXCEL-Control-1.1.8-Release
-          path: CREDIXCEL-Control-1.1.7.apk
+          path: CREDIXCEL-Control-1.1.8.apk
           if-no-files-found: error
           retention-days: 30
