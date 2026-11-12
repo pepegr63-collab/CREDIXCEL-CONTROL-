@@ -54,28 +54,31 @@ jobs:
           echo "Proyecto detectado: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Aplicar corrección de bloqueo, reinicio y liberación
+      - name: Verificar lógica de bloqueo y recuperación de la fuente
         shell: bash
         run: |
           set -euo pipefail
-          python3 .github/scripts/configure_home.py "$PROJECT_DIR"
           MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
           DEVICE="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/device/DeviceActions.kt"
-          test -f "$MAIN"
-          test -f "$DEVICE"
-          python3 - "$MAIN" <<'PY'
+          PREFS="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/data/Prefs.kt"
+          test -s "$MAIN"
+          test -s "$DEVICE"
+          test -s "$PREFS"
+          python3 - "$MAIN" "$DEVICE" "$PREFS" <<'PY'
           import pathlib, sys
-          s = pathlib.Path(sys.argv[1]).read_text()
+          main, device, prefs = [pathlib.Path(x).read_text() for x in sys.argv[1:]]
           checks = {
-              "LOCKED activa sin depender del contrato": 'state.status.equals("LOCKED", true) -> {' in s,
-              "liberación exige ACTIVE + ACTIVE": 'state.status.equals("ACTIVE", true) && state.contractStatus.equals("ACTIVE", true)' in s,
-              "recuperación al iniciar": 'DeviceActions.enterManagedLock(this)' in s,
-              "errores conservan restricción": 'se conserva la última restricción conocida' in s,
+              "LOCKED se procesa sin condición de contrato": 'device == "LOCKED" -> activateKiosk()' in main,
+              "liberación exige ACTIVE + ACTIVE": 'device == "ACTIVE" && contract == "ACTIVE" -> releaseKiosk()' in main,
+              "recuperación al volver a iniciar": 'override fun onResume()' in main and 'prefs.protectionActive' in main and 'DeviceActions.configureKiosk(this)' in main,
+              "HOME persistente bajo Device Owner": 'addPersistentPreferredActivity' in device and 'MainActivity::class.java' in device,
+              "estado de bloqueo se conserva entre reinicios": 'protection_active' in prefs,
+              "errores de sincronización no liberan": 'Se conserva el último estado local autorizado' in main,
           }
           for label, ok in checks.items():
               print(("OK: " if ok else "ERROR: ") + label)
           if not all(checks.values()):
-              raise SystemExit("La fuente no cumple todos los criterios de bloqueo.")
+              raise SystemExit("La fuente ZIP no cumple los criterios requeridos; se cancela antes de compilar.")
           PY
 
       - name: Corregir retorno al HOME real del Motorola y versionar 1.1.0
