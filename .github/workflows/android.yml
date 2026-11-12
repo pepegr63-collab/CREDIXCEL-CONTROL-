@@ -973,7 +973,7 @@ jobs:
               if active_idx is None:
                   raise SystemExit("No se encontró la rama ACTIVE + ACTIVE del Worker; no se publica.")
               indent = worker_lines[active_idx][:len(worker_lines[active_idx]) - len(worker_lines[active_idx].lstrip())] + "    "
-              worker_lines.insert(active_idx + 1, indent + "prefs.releaseAuthorizationAt = System.currentTimeMillis()\\n")
+              worker_lines.insert(active_idx + 1, indent + "prefs.releaseAuthorizationAt = System.currentTimeMillis()\n")
               worker = "".join(worker_lines)
 
           lines = main.splitlines(keepends=True)
