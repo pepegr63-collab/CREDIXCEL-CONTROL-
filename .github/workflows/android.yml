@@ -983,22 +983,38 @@ jobs:
           lines.insert(message_index + 1, indent + '    if (device == "ACTIVE" && contract == "ACTIVE") System.currentTimeMillis() else 0L\n')
           main = "".join(lines)
 
-          old_guard = '''        if (prefs.lastDeviceStatus?.trim()?.uppercase() != "ACTIVE" ||
-                    prefs.lastContractStatus?.trim()?.uppercase() != "ACTIVE") {
-                    prefs.pendingRelease = false
-                    return "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE. Se conserva la protección."
-                }'''
-          new_guard = '''        val authorizationAge = System.currentTimeMillis() - prefs.releaseAuthorizationAt
-                if (prefs.lastDeviceStatus?.trim()?.uppercase() != "ACTIVE" ||
-                    prefs.lastContractStatus?.trim()?.uppercase() != "ACTIVE" ||
-                    prefs.releaseAuthorizationAt <= 0L ||
-                    authorizationAge < 0L || authorizationAge > 5 * 60 * 1000L) {
-                    prefs.pendingRelease = false
-                    prefs.releaseAuthorizationAt = 0L
-                    return "Liberación cancelada: se requiere confirmación ACTIVE + ACTIVE reciente (máximo 5 minutos). Se conserva la protección."
-                }'''
-          if old_guard not in main: raise SystemExit("No se encontró guard de liberación 1.1.8.")
-          main = main.replace(old_guard, new_guard, 1)
+          # Replace the 1.1.8 guard using semantic anchors, independent of indentation.
+          guard_start_token = 'if (prefs.lastDeviceStatus?.trim()?.uppercase() != "ACTIVE" ||'
+          guard_start = main.find(guard_start_token)
+          if guard_start < 0:
+              raise SystemExit("No se encontró el inicio del guard de liberación 1.1.8.")
+          guard_line_start = main.rfind("\n", 0, guard_start) + 1
+          old_return = 'return "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE. Se conserva la protección."'
+          return_pos = main.find(old_return, guard_start)
+          if return_pos < 0:
+              raise SystemExit("No se encontró el mensaje del guard de liberación 1.1.8.")
+          return_line_end = main.find("\n", return_pos)
+          if return_line_end < 0:
+              raise SystemExit("El guard de liberación está truncado.")
+          close_line_start = return_line_end + 1
+          close_line_end = main.find("\n", close_line_start)
+          if close_line_end < 0: close_line_end = len(main)
+          if main[close_line_start:close_line_end].strip() != "}":
+              raise SystemExit("El cierre del guard de liberación no coincide; se cancela el parche.")
+          indent = main[guard_line_start:guard_start]
+          body_indent = indent + "    "
+          new_guard = (
+              indent + "val authorizationAge = System.currentTimeMillis() - prefs.releaseAuthorizationAt\n" +
+              indent + 'if (prefs.lastDeviceStatus?.trim()?.uppercase() != "ACTIVE" ||\n' +
+              body_indent + 'prefs.lastContractStatus?.trim()?.uppercase() != "ACTIVE" ||\n' +
+              body_indent + 'prefs.releaseAuthorizationAt <= 0L ||\n' +
+              body_indent + 'authorizationAge < 0L || authorizationAge > 5 * 60 * 1000L) {\n' +
+              body_indent + "prefs.pendingRelease = false\n" +
+              body_indent + "prefs.releaseAuthorizationAt = 0L\n" +
+              body_indent + 'return "Liberación cancelada: se requiere confirmación ACTIVE + ACTIVE reciente (máximo 5 minutos). Se conserva la protección."\n' +
+              indent + "}"
+          )
+          main = main[:guard_line_start] + new_guard + main[close_line_end:]
           main = main.replace('''                                } catch (e: Exception) {
                                     prefs.pendingRelease = false
                                     // Network/authentication failures''',
