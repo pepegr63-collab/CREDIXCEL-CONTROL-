@@ -1,4 +1,5 @@
 name: Compilar CREDIXCEL Control
+# Rebuild HOME persistente: script corregido para esta ejecución.
 
 on:
   workflow_dispatch:
