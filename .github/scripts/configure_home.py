@@ -142,7 +142,13 @@ if 'LaunchedEffect(hasCredentials)' not in a:
 
 '''
     a = a.replace(anchor, anchor + effect, 1)
-# Toda ruta manual de liberación exige estado del dispositivo y contrato ACTIVE.\na = a.replace('if (state.status.equals("ACTIVE", true)) {',\n              'if (state.status.equals("ACTIVE", true) && state.contractStatus.equals("ACTIVE", true)) {')\na = a.replace('state.status.equals("ACTIVE", true) -> {',\n              'state.status.equals("ACTIVE", true) && state.contractStatus.equals("ACTIVE", true) -> {')\n\na = a.replace('                                      prefs.isRestricted = false\n                                      prefs.isRestricted = false\n                                      isRestricted = false\n',
+# Toda ruta manual de liberación exige estado del dispositivo y contrato ACTIVE.
+a = a.replace('if (state.status.equals("ACTIVE", true)) {',
+              'if (state.status.equals("ACTIVE", true) && state.contractStatus.equals("ACTIVE", true)) {')
+a = a.replace('state.status.equals("ACTIVE", true) -> {',
+              'state.status.equals("ACTIVE", true) && state.contractStatus.equals("ACTIVE", true) -> {')
+
+a = a.replace('                                      prefs.isRestricted = false\n                                      prefs.isRestricted = false\n                                      isRestricted = false\n',
               '                                      prefs.isRestricted = false\n                                      isRestricted = false\n')
 lines = a.splitlines()
 out = []
