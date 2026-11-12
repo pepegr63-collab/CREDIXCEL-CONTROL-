@@ -78,6 +78,17 @@ if old_exit in d:
     d = d.replace(old_exit, '        if (!updateManagedLockAllowlist(activity, false)) return false', 1)
 elif 'updateManagedLockAllowlist(activity, false)' not in d:
     raise SystemExit("No se encontró la limpieza de allowlist en exitManagedLock")
+
+# Una vez retirado Lock Task y borrada la preferencia HOME persistente,
+# solicita a Android abrir el launcher habitual del usuario.
+exit_line = '        if (!updateManagedLockAllowlist(activity, false)) return false'
+home_launch = '''        activity.startActivity(android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+            addCategory(android.content.Intent.CATEGORY_HOME)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        })'''
+if exit_line not in d:
+    raise SystemExit("No se encontró el punto de restauración del launcher")
+d = d.replace(exit_line, exit_line + "\\n" + home_launch, 1)
 device.write_text(d)
 
 a = main.read_text()
@@ -105,7 +116,7 @@ if 'LaunchedEffect(hasCredentials)' not in a:
                             info = if (applied) "Orden LOCKED confirmada. Restricción administrada activada."
                                    else "Android no permitió activar el modo administrado."
                         }
-                        state.status.equals("ACTIVE", true) -> {
+                        state.status.equals("ACTIVE", true) && state.contractStatus.equals("ACTIVE", true) -> {
                             val released = DeviceActions.exitManagedLock(this@MainActivity)
                             if (released) {
                                 prefs.isRestricted = false
