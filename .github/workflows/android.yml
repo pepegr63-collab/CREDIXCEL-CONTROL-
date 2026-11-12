@@ -984,21 +984,21 @@ jobs:
               raise SystemExit("No se encontró rama LOCKED para invalidar autorización.")
           if not any("releaseAuthorizationAt = 0L" in line for line in worker_lines[locked_idx + 1:locked_idx + 5]):
               indent = worker_lines[locked_idx][:len(worker_lines[locked_idx]) - len(worker_lines[locked_idx].lstrip())] + "    "
-              worker_lines.insert(locked_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\\n")
+              worker_lines.insert(locked_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\n")
           else_idx = next((i for i, line in enumerate(worker_lines)
                            if line.strip() == "else -> {"), None)
           if else_idx is None:
               raise SystemExit("No se encontró rama de estado incierto del Worker.")
           if not any("releaseAuthorizationAt = 0L" in line for line in worker_lines[else_idx + 1:else_idx + 4]):
               indent = worker_lines[else_idx][:len(worker_lines[else_idx]) - len(worker_lines[else_idx].lstrip())] + "    "
-              worker_lines.insert(else_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\\n")
+              worker_lines.insert(else_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\n")
           catch_idx = next((i for i, line in enumerate(worker_lines)
                             if line.strip() == "} catch (_: Exception) {"), None)
           if catch_idx is None:
               raise SystemExit("No se encontró catch del Worker.")
           if not any("releaseAuthorizationAt = 0L" in line for line in worker_lines[catch_idx + 1:catch_idx + 4]):
               indent = worker_lines[catch_idx][:len(worker_lines[catch_idx]) - len(worker_lines[catch_idx].lstrip())] + "    "
-              worker_lines.insert(catch_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\\n")
+              worker_lines.insert(catch_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\n")
           worker = "".join(worker_lines)
 
                     lines = main.splitlines(keepends=True)
@@ -1066,11 +1066,11 @@ jobs:
           sync_catch = main.find("} catch (e: Exception) {", sync_start)
           if sync_catch < 0:
               raise SystemExit("No se encontró catch de sincronización manual.")
-          catch_end = main.find("\\n", sync_catch)
+          catch_end = main.find("\n", sync_catch)
           if "prefs.releaseAuthorizationAt = 0L" not in main[catch_end:catch_end + 180]:
               insert_at = catch_end + 1
-              indent = main[main.rfind("\\n", 0, sync_catch) + 1:sync_catch]
-              main = main[:insert_at] + indent + "    prefs.releaseAuthorizationAt = 0L\\n" + main[insert_at:]
+              indent = main[main.rfind("\n", 0, sync_catch) + 1:sync_catch]
+              main = main[:insert_at] + indent + "    prefs.releaseAuthorizationAt = 0L\n" + main[insert_at:]
 
           # Replace the method by locating its signature and matching braces; whitespace is irrelevant.
           method_signature = "private fun enterLockTaskIfAuthorized()"
