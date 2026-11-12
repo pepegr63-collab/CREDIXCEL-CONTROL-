@@ -1071,7 +1071,7 @@ jobs:
           main = main[:resume_start] + new_resume + main[resume_end:]
 
           # Add the real Lock Task confirmation inside activateKiosk without matching indentation.
-          activate_token = "activateKiosk("
+          activate_token = "private fun activateKiosk(): String"
           activate_pos = main.find(activate_token)
           if activate_pos < 0: raise SystemExit("No se encontró activateKiosk.")
           activate_open = main.find("{", activate_pos)
