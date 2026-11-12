@@ -26,12 +26,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Instalar herramientas Android
+      - name: Configurar SDK Android
         uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platforms;android-35
-            build-tools;35.0.0
+
+      - name: Instalar plataforma y build-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Preparar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
