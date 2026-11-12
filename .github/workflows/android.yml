@@ -928,7 +928,8 @@ jobs:
               "Worker no intenta detener Lock Task en segundo plano": "stopLockTask()" not in worker,
               "Activity visible completa la liberación": "if (prefs.pendingRelease)" in main and "releaseKiosk()" in main,
               "fallos de red invalidan liberación pendiente y reintentan": "Result.retry()" in worker and "prefs.pendingRelease = false" in worker,
-              "estado incierto invalida liberación pendiente": "else -> {" in worker and "prefs.pendingRelease = false" in worker,\n              "liberación valida los dos estados guardados": "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" in main,
+              "estado incierto invalida liberación pendiente": "else -> {" in worker and "prefs.pendingRelease = false" in worker,
+              "liberación valida los dos estados guardados": "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" in main,
               "versión 1.1.8 / código 19": 'versionName = "1.1.8"' in build and "versionCode = 19" in build,
           }
           for label, ok in checks.items():
