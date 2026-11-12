@@ -953,7 +953,7 @@ jobs:
                 }
             }
             Result.success()
-        } catch (_: Exception) {
+                  } catch (_: Exception) {
             prefs.pendingRelease = false''',
               '''                else -> {
                     prefs.releaseAuthorizationAt = 0L
@@ -961,7 +961,7 @@ jobs:
                 }
             }
             Result.success()
-        } catch (_: Exception) {
+                  } catch (_: Exception) {
             prefs.releaseAuthorizationAt = 0L
             prefs.pendingRelease = false''', 1)
 
@@ -1007,7 +1007,7 @@ jobs:
             if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
                 runCatching { startLockTask() }
             }
-        }'''
+          }'''
           new_enter = '''    private fun enterLockTaskIfAuthorized(): Boolean {
             if (!DeviceActions.isDeviceOwner(this)) return false
             if (!DeviceActions.configureKiosk(this) || !DeviceActions.isLockTaskPermitted(this)) return false
@@ -1016,7 +1016,7 @@ jobs:
                 if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) startLockTask()
                 manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_LOCKED
             }.getOrDefault(false)
-        }'''
+          }'''
           if old_enter not in main: raise SystemExit("No se encontró enterLockTaskIfAuthorized.")
           main = main.replace(old_enter, new_enter, 1)
 
