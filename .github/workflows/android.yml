@@ -289,6 +289,125 @@ jobs:
           print("OK: HOME externo solo se abre tras confirmar toda la limpieza; versión 1.1.3.")
           PY
 
+      - name: Endurecer liberación con rollback y versionar 1.1.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$BUILD" <<'PY'
+          import pathlib, re, sys
+          main_path, build_path = map(pathlib.Path, sys.argv[1:])
+          s = main_path.read_text()
+          pattern = r"    private fun releaseKiosk\\(\\): String \\{.*?\\n    \\}\\n\\n    @Composable"
+          replacement = '''    /** Re-establish the authorized restriction if any release operation fails. */
+              private fun restoreKioskAfterFailedRelease(): Boolean {
+                  prefs.protectionActive = true
+                  val policiesRestored = DeviceActions.applyFinancingProtection(this)
+                  val kioskConfigured = DeviceActions.configureKiosk(this) &&
+                      DeviceActions.isLockTaskPermitted(this)
+                  val lockTaskRestored = if (kioskConfigured) {
+                      runCatching {
+                          val manager = getSystemService(ActivityManager::class.java)
+                          if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
+                              startLockTask()
+                          }
+                          manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
+                      }.getOrDefault(false)
+                  } else false
+                  return policiesRestored && kioskConfigured && lockTaskRestored
+              }
+
+              private fun releaseKiosk(): String {
+                  if (!DeviceActions.isDeviceOwner(this)) {
+                      return "El servidor confirmó ACTIVE + ACTIVE, pero CREDIXCEL ya no es Device Owner. Se conserva el estado local."
+                  }
+
+                  // Never stop Lock Task or clear HOME until policy removal has fully succeeded.
+                  val policiesReleased = DeviceActions.releaseFinancingProtection(this)
+                  if (!policiesReleased) {
+                      val rollback = restoreKioskAfterFailedRelease()
+                      return "No se pudo retirar todas las políticas. Se restauró la protección: $rollback."
+                  }
+
+                  val lockTaskStopped = runCatching {
+                      val manager = getSystemService(ActivityManager::class.java)
+                      if (manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE) stopLockTask()
+                      manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE
+                  }.getOrDefault(false)
+                  if (!lockTaskStopped) {
+                      val rollback = restoreKioskAfterFailedRelease()
+                      return "Android no confirmó la salida de Lock Task. Se restauró la protección: $rollback."
+                  }
+
+                  val kioskCleared = DeviceActions.clearKioskConfiguration(this)
+                  if (!kioskCleared) {
+                      val rollback = restoreKioskAfterFailedRelease()
+                      return "No se pudo limpiar la configuración de kiosco. Se restauró la protección: $rollback."
+                  }
+
+                  // Do not clear the durable local lock until the real external launcher is launched.
+                  val homeOpened = openSystemHome()
+                  if (!homeOpened) {
+                      val rollback = restoreKioskAfterFailedRelease()
+                      return "No se pudo abrir el HOME del Motorola. Se restauró la protección: $rollback."
+                  }
+
+                  prefs.protectionActive = false
+                  finish()
+                  return "Liberación completada: políticas retiradas, Lock Task detenido y HOME real del Motorola abierto."
+              }
+
+              @Composable'''
+          s2, n = re.subn(pattern, lambda m: replacement, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit("No se encontró exactamente la función releaseKiosk completa.")
+          s = s2
+          required = [
+              "restoreKioskAfterFailedRelease",
+              "if (!policiesReleased)",
+              "if (!lockTaskStopped)",
+              "if (!kioskCleared)",
+              "if (!homeOpened)",
+              "prefs.protectionActive = false",
+              "finish()",
+          ]
+          if not all(x in s for x in required):
+              raise SystemExit("Falló una verificación de la liberación transaccional.")
+          main_path.write_text(s)
+
+          b = build_path.read_text()
+          if "versionCode = 14" not in b or 'versionName = "1.1.3"' not in b:
+              raise SystemExit("La fuente no coincide con 1.1.3 antes del versionado.")
+          b = b.replace("versionCode = 14", "versionCode = 15", 1)
+          b = b.replace('versionName = "1.1.3"', 'versionName = "1.1.4"', 1)
+          build_path.write_text(b)
+          print("OK: rollback de protección ante cada fallo; versión 1.1.4.")
+          PY
+
+      - name: Verificar liberación transaccional antes de publicar
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$BUILD" <<'PY'
+          import pathlib, sys
+          main, build = [pathlib.Path(x).read_text() for x in sys.argv[1:]]
+          checks = {
+              "rollback reactiva políticas y kiosco": "restoreKioskAfterFailedRelease" in main and "applyFinancingProtection(this)" in main and "configureKiosk(this)" in main,
+              "políticas se retiran antes de salir de Lock Task": main.index("val policiesReleased = DeviceActions.releaseFinancingProtection(this)") < main.index("val lockTaskStopped = runCatching"),
+              "cada fallo ejecuta rollback": all(x in main for x in ["if (!policiesReleased)", "if (!lockTaskStopped)", "if (!kioskCleared)", "if (!homeOpened)"]),
+              "estado local se limpia al final": main.index("val homeOpened = openSystemHome()") < main.index("prefs.protectionActive = false"),
+              "HOME externo termina la Activity": "prefs.protectionActive = false\\n                  finish()" in main,
+              "versión 1.1.4 / código 15": 'versionName = "1.1.4"' in build and "versionCode = 15" in build,
+          }
+          for label, ok in checks.items():
+              print(("OK: " if ok else "ERROR: ") + label)
+          if not all(checks.values()):
+              raise SystemExit("La validación de liberación transaccional falló.")
+          PY
+
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
