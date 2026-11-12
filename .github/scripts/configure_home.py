@@ -88,7 +88,7 @@ home_launch = '''        activity.startActivity(android.content.Intent(android.c
         })'''
 if exit_line not in d:
     raise SystemExit("No se encontró el punto de restauración del launcher")
-d = d.replace(exit_line, exit_line + "\\n" + home_launch, 1)
+d = d.replace(exit_line, exit_line + chr(10) + home_launch, 1)
 device.write_text(d)
 
 a = main.read_text()
