@@ -411,7 +411,7 @@ jobs:
                   true
               }.getOrDefault(false)
           }
-'''
+          '''
           s = s[:start] + helper + s[end:]
           checks = [
               "packageManager.getHomeActivities(candidates)",
