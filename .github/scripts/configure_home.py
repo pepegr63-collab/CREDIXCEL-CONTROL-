@@ -52,8 +52,14 @@ helper = '''
                     ComponentName(context, com.credixcel.control.MainActivity::class.java)
                 )
             } else {
-                manager.clearPackagePersistentPreferredActivities(admin(context), context.packageName)
+                // Primero retirar la app de la allowlist: Android debe terminar Lock Task
+                // aunque la limpieza posterior de HOME persistente falle.
                 manager.setLockTaskPackages(admin(context), emptyArray())
+                try {
+                    manager.clearPackagePersistentPreferredActivities(admin(context), context.packageName)
+                } catch (_: Exception) {
+                    // La navegación ya quedó liberada; no volver a mantener Lock Task por este fallo.
+                }
             }
             true
         } catch (_: Exception) { false }
