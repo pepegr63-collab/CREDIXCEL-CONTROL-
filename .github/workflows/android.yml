@@ -1152,6 +1152,30 @@ jobs:
               'manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_LOCKED\n                    }.getOrDefault(false)', 1
           )
 
+          # If a pending release expires before Activity resumes, restore LOCKED in the same resume.
+          old_resume_release = '''        if (prefs.pendingRelease) {
+                      val result = releaseKiosk()
+                      if (prefs.pendingRelease) {
+                          Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+                      }
+                      return
+                  }
+                  if (!prefs.protectionActive) return'''
+          new_resume_release = '''        if (prefs.pendingRelease) {
+                      val result = releaseKiosk()
+                      if (prefs.pendingRelease) {
+                          Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+                          return
+                      }
+                      // A stale authorization was rejected; continue and restore LOCKED below.
+                  }
+                  if (!prefs.protectionActive) return'''
+          if old_resume_release not in main:
+              if "A stale authorization was rejected; continue and restore LOCKED below." not in main:
+                  raise SystemExit("No se encontró el flujo pendingRelease de onResume para corregir.")
+          else:
+              main = main.replace(old_resume_release, new_resume_release, 1)
+
           if 'versionName = "1.1.8"' not in build or "versionCode = 19" not in build:
               raise SystemExit("Versión base distinta de 1.1.8 / código 19.")
           build = build.replace("versionCode = 19", "versionCode = 20", 1)
