@@ -75,10 +75,74 @@ jobs:
           PY
           grep -n -A2 -B2 'device == "LOCKED"' "$MAIN"
 
+      - name: Corregir retorno al HOME real del Motorola y versionar 1.1.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$BUILD" <<'PY'
+          import pathlib, sys
+          main = pathlib.Path(sys.argv[1])
+          build = pathlib.Path(sys.argv[2])
+          s = main.read_text()
+          old = """        // Once the persistent HOME preference is cleared, Android resolves HOME to the user's launcher.
+                  val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                      addCategory(Intent.CATEGORY_HOME)
+                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                  }
+                  runCatching { startActivity(homeIntent) }
+          """
+          new = """        // Launch the actual system launcher explicitly; CREDIXCEL also declares a HOME filter.
+                  val homeOpened = openSystemHome()
+
+          """
+          if old not in s:
+              raise SystemExit("No se encontró el bloque HOME esperado; se cancela el parche.")
+          s = s.replace(old, new, 1)
+          anchor = "    private fun releaseKiosk(): String {"
+          helper = """    /** Opens the real Android launcher, never this app's own HOME activity. */
+          private fun openSystemHome(): Boolean {
+              val candidates = mutableListOf<android.content.pm.ResolveInfo>()
+              val preferred = packageManager.getHomeActivities(candidates)
+              val target = preferred?.takeIf { it.packageName != packageName }
+                  ?: candidates.firstOrNull { it.activityInfo.packageName != packageName }
+                      ?.activityInfo
+                      ?.let { android.content.ComponentName(it.packageName, it.name) }
+                  ?: return false
+
+              return runCatching {
+                  startActivity(Intent(Intent.ACTION_MAIN).apply {
+                      addCategory(Intent.CATEGORY_HOME)
+                      component = target
+                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                  })
+                  true
+              }.getOrDefault(false)
+          }
+
+          """
+          if anchor not in s:
+              raise SystemExit("No se encontró releaseKiosk para insertar el selector de HOME.")
+          s = s.replace(anchor, helper + anchor, 1)
+          s = s.replace(
+              "            lockTaskStopped && kioskCleared && policiesReleased ->\n                \"Liberación completada: Lock Task retirado, políticas liberadas y HOME normal solicitado.\"\n            else ->\n                \"Se recibió ACTIVE + ACTIVE y se detuvo la restricción local. Atención: alguna limpieza de políticas o HOME no se confirmó (Lock Task=$lockTaskStopped, HOME=$kioskCleared, políticas=$policiesReleased).\"",
+              "            lockTaskStopped && kioskCleared && policiesReleased && homeOpened ->\n                \"Liberación completada: Lock Task retirado, políticas liberadas y HOME real del Motorola abierto.\"\n            else ->\n                \"Se recibió ACTIVE + ACTIVE. Resultado: Lock Task=$lockTaskStopped, HOME limpiado=$kioskCleared, HOME del Motorola abierto=$homeOpened, políticas=$policiesReleased.\"",
+              1
+          )
+          main.write_text(s)
+          b = build.read_text()
+          if "versionCode = 10" not in b or 'versionName = "1.0.9"' not in b:
+              raise SystemExit("La versión de origen no coincide con 1.0.9; se cancela el versionado.")
+          b = b.replace("versionCode = 10", "versionCode = 11", 1).replace('versionName = "1.0.9"', 'versionName = "1.1.0"', 1)
+          build.write_text(b)
+          print("OK: HOME explícito y versión 1.1.0.")
+          PY
+
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.0.9
+          name: CREDIXCEL-Control-Fuente-1.1.0
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -118,12 +182,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.0.9.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.0.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.0.9-Release
-          path: CREDIXCEL-Control-1.0.9.apk
+          name: CREDIXCEL-Control-1.1.0-Release
+          path: CREDIXCEL-Control-1.1.0.apk
           if-no-files-found: error
           retention-days: 30
