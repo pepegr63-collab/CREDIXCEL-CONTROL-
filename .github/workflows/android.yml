@@ -657,7 +657,7 @@ jobs:
           if "prefs.pendingRelease = false" not in main:
               import re
               main, cleared = re.subn(
-                  r"(\\n[ \\t]*)prefs\\.protectionActive = false(\\s*\\n[ \\t]*finish\\(\\))",
+                  r"(\n[ \t]*)prefs\.protectionActive = false(\s*\n[ \t]*finish\(\))",
                   lambda m: m.group(1) + "prefs.protectionActive = false" + m.group(1) + "prefs.pendingRelease = false" + m.group(2),
                   main,
                   count=1
