@@ -113,17 +113,20 @@ jobs:
               1
           )
           anchor = "    private fun releaseKiosk(): String {"
-          helper = """    /** Launch only Android's configured default HOME; never guess among launchers. */
+          helper = """    /** Open Android's resolved HOME only when it is a real external launcher, never guess. */
           private fun openSystemHome(): Boolean {
-              val homeActivities = mutableListOf<android.content.pm.ResolveInfo>()
-              val defaultHome = packageManager.getHomeActivities(homeActivities)
-                  ?: return false
-              if (defaultHome.packageName == packageName) return false
+              val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+              val launcher = packageManager.resolveActivity(
+                  homeIntent,
+                  android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+              )?.activityInfo ?: return false
+              if (launcher.packageName == packageName ||
+                  launcher.name.endsWith(".ResolverActivity")) return false
 
+              val homeComponent = android.content.ComponentName(launcher.packageName, launcher.name)
               return runCatching {
-                  startActivity(Intent(Intent.ACTION_MAIN).apply {
-                      addCategory(Intent.CATEGORY_HOME)
-                      component = defaultHome
+                  startActivity(homeIntent.apply {
+                      component = homeComponent
                       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                   })
                   true
@@ -371,7 +374,7 @@ jobs:
               "cada fallo ejecuta rollback": all(x in main for x in ["if (!policiesReleased)", "if (!lockTaskStopped)", "if (!kioskCleared)", "if (!homeOpened)"]),
               "estado local se limpia al final": main.index("val homeOpened = openSystemHome()") < main.index("prefs.protectionActive = false"),
               "HOME externo termina la Activity": main.index("prefs.protectionActive = false") < main.index("finish()"),
-              "HOME usa el launcher predeterminado de Android": "packageManager.getHomeActivities(homeActivities)" in main and "defaultHome.packageName == packageName" in main,
+              "HOME usa launcher resuelto por Android": "packageManager.resolveActivity(" in main and "launcher.packageName == packageName" in main and "ResolverActivity" in main,
               "versión 1.1.4 / código 15": 'versionName = "1.1.4"' in build and "versionCode = 15" in build,
           }
           for label, ok in checks.items():
