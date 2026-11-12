@@ -115,12 +115,17 @@ jobs:
           anchor = "    private fun releaseKiosk(): String {"
           helper = """    /** Opens the real Android launcher, excluding CREDIXCEL's own HOME activity. */
           private fun openSystemHome(): Boolean {
-              val candidates = mutableListOf<android.content.pm.ResolveInfo>()
-              val preferredHome = packageManager.getHomeActivities(candidates)
-              val component = preferredHome?.takeIf { it.packageName != packageName }
-                  ?: candidates.firstOrNull { it.activityInfo.packageName != packageName }
-                      ?.activityInfo?.let { android.content.ComponentName(it.packageName, it.name) }
-                  ?: return false
+              val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+              val candidates = packageManager.queryIntentActivities(
+                  homeIntent,
+                  android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+              )
+              val launcher = candidates
+                  .filter { it.activityInfo.packageName != this.packageName }
+                  .sortedByDescending { it.isDefault }
+                  .firstOrNull()
+                  ?.activityInfo ?: return false
+              val component = android.content.ComponentName(launcher.packageName, launcher.name)
 
               return runCatching {
                   startActivity(Intent(Intent.ACTION_MAIN).apply {
