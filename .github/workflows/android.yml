@@ -182,8 +182,8 @@ jobs:
               raise SystemExit("No se encontró el bloque de confirmación de liberación esperado.")
           s = s.replace(old, new, 1)
           # Verify the selector patched in the preceding step without brittle indentation matching.
-          if 'packageManager.getHomeActivities(homeActivities)' not in s or 'defaultHome.packageName == packageName' not in s:
-              raise SystemExit("No se encontró la resolución del HOME preferido después del parche.")
+          if 'packageManager.resolveActivity(' not in s or 'launcher.packageName == packageName' not in s or 'launcher.name.endsWith(".ResolverActivity")' not in s:
+              raise SystemExit("No se encontró el selector HOME externo basado en resolveActivity después del parche.")
           old_active = 'device == "ACTIVE" && contract == "ACTIVE" -> releaseKiosk()'
           new_active = '''device == "ACTIVE" && contract == "ACTIVE" -> {
                                               val manager = getSystemService(ActivityManager::class.java)
@@ -225,8 +225,9 @@ jobs:
           assert 'device == "ACTIVE" && contract == "ACTIVE" -> {' in final
           assert 'DeviceActions.isLockTaskPermitted(this@MainActivity)' in final
           assert 'policiesReleased && homeOpened' in final
-          assert 'packageManager.getHomeActivities(homeActivities)' in final
-          assert 'defaultHome.packageName == packageName' in final
+          assert 'packageManager.resolveActivity(' in final
+          assert 'launcher.packageName == packageName' in final
+          assert 'launcher.name.endsWith(".ResolverActivity")' in final
           assert '<queries>' in manifest_path.read_text()
           print("OK: liberación solo con HOME externo confirmado, sin redirección al sincronizar un equipo ya ACTIVE, visibilidad HOME declarada y versión 1.1.1.")
           PY
