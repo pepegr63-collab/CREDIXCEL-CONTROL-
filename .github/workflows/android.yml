@@ -54,24 +54,22 @@ jobs:
           echo "Proyecto detectado: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Validar autorización doble para activar Lock Task
+      - name: Validar que LOCKED siempre mantenga Lock Task
         shell: bash
         run: |
           set -euo pipefail
           MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
           test -f "$MAIN"
           python3 - "$MAIN" <<'PY'
-          import pathlib, sys
+          import pathlib, re, sys
           p = pathlib.Path(sys.argv[1])
           s = p.read_text()
-          old = 'device == "LOCKED" -> activateKiosk()'
-          new = '''device == "LOCKED" && contract == "ACTIVE" -> activateKiosk()
-                                          device == "LOCKED" -> "LOCKED recibido, pero el contrato no está ACTIVE. No se activa Lock Task."'''
-          if old not in s:
-              raise SystemExit("No se encontró exactamente la condición LOCKED esperada; se cancela para evitar un parche incorrecto.")
-          s = s.replace(old, new, 1)
-          p.write_text(s)
-          print("OK: Lock Task solo se activa con LOCKED + ACTIVE.")
+          expected = 'device == "LOCKED" -> activateKiosk()'
+          if expected not in s:
+              raise SystemExit("ERROR: la fuente no activa/mantiene Lock Task ante LOCKED sin depender del estado del contrato.")
+          if 'device == "LOCKED" && contract == "ACTIVE" -> activateKiosk()' in s:
+              raise SystemExit("ERROR: se detectó la condición incorrecta LOCKED + ACTIVE; LOCKED debe prevalecer por sí solo.")
+          print("OK: LOCKED activa/mantiene Lock Task independientemente del estado del contrato.")
           PY
           grep -n -A2 -B2 'device == "LOCKED"' "$MAIN"
 
