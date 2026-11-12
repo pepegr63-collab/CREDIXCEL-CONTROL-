@@ -965,6 +965,17 @@ jobs:
             prefs.releaseAuthorizationAt = 0L
             prefs.pendingRelease = false''', 1)
 
+          # Asegurar la marca temporal en la rama ACTIVE+ACTIVE aunque cambie la indentación del ZIP base.
+          if "releaseAuthorizationAt = System.currentTimeMillis()" not in worker:
+              worker_lines = worker.splitlines(keepends=True)
+              active_idx = next((i for i, line in enumerate(worker_lines)
+                                 if 'device == "ACTIVE" && contract == "ACTIVE" -> {' in line), None)
+              if active_idx is None:
+                  raise SystemExit("No se encontró la rama ACTIVE + ACTIVE del Worker; no se publica.")
+              indent = worker_lines[active_idx][:len(worker_lines[active_idx]) - len(worker_lines[active_idx].lstrip())] + "    "
+              worker_lines.insert(active_idx + 1, indent + "prefs.releaseAuthorizationAt = System.currentTimeMillis()\\n")
+              worker = "".join(worker_lines)
+
           lines = main.splitlines(keepends=True)
           status_index = next((i for i, line in enumerate(lines)
                                if "prefs.lastDeviceStatus = device" in line), None)
