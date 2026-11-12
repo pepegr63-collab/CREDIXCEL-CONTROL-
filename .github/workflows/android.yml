@@ -375,10 +375,10 @@ jobs:
           # El selector HOME ya fue instalado por los pasos anteriores.
           # Validarlo sin depender de su sangría exacta.
           checks = {
-              "HOME usa el selector Android de launchers": "packageManager.getHomeActivities(candidates)" in source,
-              "HOME excluye la propia aplicación": "activity.packageName != packageName" in source,
+              "HOME usa el selector Android de launchers": "packageManager.resolveActivity(" in source,
+              "HOME excluye la propia aplicación": "launcher.packageName == packageName" in source,
               "HOME evita ResolverActivity": '".ResolverActivity"' in source,
-              "HOME inicia el componente seleccionado": "startActivity(homeIntent)" in source,
+              "HOME inicia el componente seleccionado": "startActivity(homeIntent.apply" in source,
           }
           for label, ok in checks.items():
               print(("OK: " if ok else "ERROR: ") + label)
@@ -408,7 +408,7 @@ jobs:
               "cada fallo ejecuta rollback": all(x in main for x in ["if (!policiesReleased)", "if (!lockTaskStopped)", "if (!kioskCleared)", "if (!homeOpened)"]),
               "estado local se limpia al final": main.index("val homeOpened = openSystemHome()") < main.index("prefs.protectionActive = false"),
               "HOME externo termina la Activity": main.index("prefs.protectionActive = false") < main.index("finish()"),
-              "HOME se obtiene de candidatos reales de Android": "packageManager.getHomeActivities(candidates)" in main and "candidates.filter(::isExternalLauncher).singleOrNull()" in main and "activity.packageName != packageName" in main,
+              "HOME se obtiene del launcher resuelto por Android y excluye CREDIXCEL": "packageManager.resolveActivity(" in main and "launcher.packageName == packageName" in main and "launcher.name.endsWith(\".ResolverActivity\")" in main,
               "versión 1.1.5 / código 16": 'versionName = "1.1.5"' in build and "versionCode = 16" in build,
           }
           for label, ok in checks.items():
