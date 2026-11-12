@@ -1153,32 +1153,54 @@ jobs:
           )
 
           # If a pending release expires before Activity resumes, restore LOCKED in the same resume.
-          old_resume_release = (
-              "        if (prefs.pendingRelease) {\\n"
-              "            val result = releaseKiosk()\\n"
-              "            if (prefs.pendingRelease) {\\n"
-              "                Toast.makeText(this, result, Toast.LENGTH_LONG).show()\\n"
-              "            }\\n"
-              "            return\\n"
-              "        }\\n"
-              "        if (!prefs.protectionActive) return"
-          )
-          new_resume_release = (
-              "        if (prefs.pendingRelease) {\\n"
-              "            val result = releaseKiosk()\\n"
-              "            if (prefs.pendingRelease) {\\n"
-              "                Toast.makeText(this, result, Toast.LENGTH_LONG).show()\\n"
-              "                return\\n"
-              "            }\\n"
-              "            // A stale authorization was rejected; continue and restore LOCKED below.\\n"
-              "        }\\n"
-              "        if (!prefs.protectionActive) return"
-          )
-          if old_resume_release not in main:
-              if "A stale authorization was rejected; continue and restore LOCKED below." not in main:
-                  raise SystemExit("No se encontró el flujo pendingRelease de onResume para corregir.")
+          # Parse onResume braces instead of relying on whitespace in the ZIP source.
+          resume_method = main.find("override fun onResume()")
+          if resume_method < 0:
+              raise SystemExit("No se encontró onResume para proteger el retorno.")
+          resume_open = main.find("{", resume_method)
+          depth = 0
+          resume_method_end = -1
+          for pos in range(resume_open, len(main)):
+              if main[pos] == "{": depth += 1
+              elif main[pos] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      resume_method_end = pos
+                      break
+          if resume_method_end < 0:
+              raise SystemExit("onResume no tiene cierre.")
+          resume_segment = main[resume_method:resume_method_end]
+          marker = "// A stale authorization was rejected; continue and restore LOCKED below."
+          if marker not in resume_segment:
+              pending_start = resume_segment.find("if (prefs.pendingRelease)")
+              if pending_start < 0:
+                  raise SystemExit("No se encontró pendingRelease dentro de onResume.")
+              pending_open = resume_segment.find("{", pending_start)
+              depth = 0
+              pending_end = -1
+              for pos in range(pending_open, len(resume_segment)):
+                  if resume_segment[pos] == "{": depth += 1
+                  elif resume_segment[pos] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          pending_end = pos + 1
+                          break
+              if pending_end < 0:
+                  raise SystemExit("El bloque pendingRelease de onResume no tiene cierre.")
+              new_pending = '''if (prefs.pendingRelease) {
+                      val result = releaseKiosk()
+                      if (prefs.pendingRelease) {
+                          Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+                          return
+                      }
+                      // A stale authorization was rejected; continue and restore LOCKED below.
+                  }'''
+              resume_segment = resume_segment[:pending_start] + new_pending + resume_segment[pending_end:]
+              main = main[:resume_method] + resume_segment + main[resume_method_end:]
           else:
-              main = main.replace(old_resume_release, new_resume_release, 1)
+              if "if (!prefs.protectionActive) return" not in resume_segment or "enterLockTaskIfAuthorized()" not in resume_segment:
+                  raise SystemExit("La recuperación LOCKED tras autorización caducada está incompleta.")
+
 
           if 'versionName = "1.1.8"' not in build or "versionCode = 19" not in build:
               raise SystemExit("Versión base distinta de 1.1.8 / código 19.")
