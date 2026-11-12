@@ -417,7 +417,7 @@ jobs:
               raise SystemExit("La validación de liberación transaccional falló.")
           PY
 
-      - name: Incorporar sincronización automática segura y versionar 1.1.7
+      - name: Incorporar sincronización automática segura y versionar 1.1.6
         shell: bash
         run: |
           set -euo pipefail
@@ -676,8 +676,8 @@ jobs:
 
           if "versionCode = 16" not in build or 'versionName = "1.1.5"' not in build:
               raise SystemExit("La fuente no coincide con 1.1.5 antes del versionado.")
-          build = build.replace("versionCode = 16", "versionCode = 18", 1)
-          build = build.replace('versionName = "1.1.5"', 'versionName = "1.1.7"', 1)
+          build = build.replace("versionCode = 16", "versionCode = 17", 1)
+          build = build.replace('versionName = "1.1.5"', 'versionName = "1.1.6"', 1)
 
           # Assertions validate the actual patched files.
           assert "PeriodicWorkRequestBuilder<ServerSyncWorker>(15, TimeUnit.MINUTES)" in main
@@ -687,13 +687,13 @@ jobs:
           assert "var pendingRelease: Boolean" in prefs
           assert 'device == "ACTIVE" && contract == "ACTIVE"' in pathlib.Path(sys.argv[1]).read_text()
           assert "POST_NOTIFICATIONS" in manifest
-          assert 'versionName = "1.1.7"' in build and "versionCode = 18" in build
+          assert 'versionName = "1.1.6"' in build and "versionCode = 17" in build
 
           main_path.write_text(main)
           prefs_path.write_text(prefs)
           manifest_path.write_text(manifest)
           build_path.write_text(build)
-          print("OK: sincronización periódica, comandos durables y liberación solo en Activity visible; versión 1.1.7.")
+          print("OK: sincronización periódica, comandos durables y liberación solo en Activity visible; versión 1.1.6.")
           PY
 
       - name: Corregir permisos y reacción inmediata a comandos del servidor; versionar 1.1.7
