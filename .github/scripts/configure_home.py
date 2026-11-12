@@ -158,9 +158,9 @@ a = "\n".join(out) + "\n"
 main.write_text(a)
 
 b = build.read_text()
-b, n1 = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>6', b, count=1)
-b, n2 = re.subn(r'(?m)^(\s*versionName\s*=\s*)"[^"]+"', r'\g<1>"1.0.5"', b, count=1)
+b, n1 = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>7', b, count=1)
+b, n2 = re.subn(r'(?m)^(\s*versionName\s*=\s*)"[^"]+"', r'\g<1>"1.0.6"', b, count=1)
 if n1 != 1 or n2 != 1:
     raise SystemExit(f"No se pudo incrementar la versión: code={n1}, name={n2}")
 build.write_text(b)
-print("HOME persistente, sincronización al abrir y versión 1.0.5 configurados.")
+print("HOME persistente, sincronización al abrir y versión 1.0.6 configurados.")
