@@ -979,7 +979,7 @@ jobs:
           if message_index is None:
               raise SystemExit("No se encontró serverMessage después de los estados.")
           indent = lines[message_index][:len(lines[message_index]) - len(lines[message_index].lstrip())]
-          lines.insert(message_index, indent + "prefs.releaseAuthorizationAt =\\n")
+          lines.insert(message_index, indent + "prefs.releaseAuthorizationAt =\n")
           lines.insert(message_index + 1, indent + '    if (device == "ACTIVE" && contract == "ACTIVE") System.currentTimeMillis() else 0L\\n')
           main = "".join(lines)
 
