@@ -6,6 +6,7 @@ on:
   push:
     paths:
       - ".github/workflows/android.yml"
+      - ".github/scripts/configure_home.py"
       - "CREDIXCEL-Control-fixed9-sin-bloqueos*.zip"
 
 jobs:
@@ -292,7 +293,8 @@ jobs:
                               state.contractStatus.equals("ACTIVE", true) -> {
                               prefs.isRestricted = DeviceActions.updateManagedLockAllowlist(applicationContext, true)
                           }
-                          state.status.equals("ACTIVE", true) -> {
+                          state.status.equals("ACTIVE", true) &&
+                              state.contractStatus.equals("ACTIVE", true) -> {
                               DeviceActions.updateManagedLockAllowlist(applicationContext, false)
                               prefs.isRestricted = false
                           }
