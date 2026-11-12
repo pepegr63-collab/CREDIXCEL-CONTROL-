@@ -12,21 +12,16 @@ for p in (manifest, main, device, build):
         raise SystemExit(f"No se encontró archivo requerido: {p}")
 
 m = manifest.read_text()
-pat = r'(<activity\s+android:name="\.MainActivity"[^>]*>)(.*?)(</activity>)'
-match = re.search(pat, m, re.S)
-if not match:
-    raise SystemExit("No se encontró la declaración de MainActivity en el manifiesto")
-body = match.group(2)
-if 'android.intent.category.HOME' not in body:
-    body += '''
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.HOME" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>'''
-    m = m[:match.start(2)] + body + m[match.end(2):]
+# CREDIXCEL nunca debe declararse como launcher HOME: solo usa Lock Task
+# durante una restricción activa. Conserva el filtro MAIN/LAUNCHER normal.
+m = re.sub(
+    r'\s*<intent-filter>(?:(?!</intent-filter>).)*?<category\s+android:name="android\.intent\.category\.HOME"\s*/>(?:(?!</intent-filter>).)*?</intent-filter>',
+    '',
+    m,
+    count=1,
+    flags=re.S
+)
 manifest.write_text(m)
-
 d = device.read_text()
 helper = '''
     /** Configura Lock Task y HOME persistente desde Activity o Worker. */
@@ -43,14 +38,7 @@ helper = '''
                             DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD
                     )
                 }
-                val home = android.content.IntentFilter(android.content.Intent.ACTION_MAIN).apply {
-                    addCategory(android.content.Intent.CATEGORY_HOME)
-                    addCategory(android.content.Intent.CATEGORY_DEFAULT)
-                }
-                manager.addPersistentPreferredActivity(
-                    admin(context), home,
-                    ComponentName(context, com.credixcel.control.MainActivity::class.java)
-                )
+                // No registrar CREDIXCEL como HOME: Lock Task es suficiente.
             } else {
                 // Primero retirar la app de la allowlist: Android debe terminar Lock Task
                 // aunque la limpieza posterior de HOME persistente falle.
@@ -165,8 +153,8 @@ main.write_text(a)
 
 b = build.read_text()
 b, n1 = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>7', b, count=1)
-b, n2 = re.subn(r'(?m)^(\s*versionName\s*=\s*)"[^"]+"', r'\g<1>"1.0.6"', b, count=1)
+b, n2 = re.subn(r'(?m)^(\s*versionName\s*=\s*)"[^"]+"', r'\g<1>"1.0.7"', b, count=1)
 if n1 != 1 or n2 != 1:
     raise SystemExit(f"No se pudo incrementar la versión: code={n1}, name={n2}")
 build.write_text(b)
-print("HOME persistente, sincronización al abrir y versión 1.0.6 configurados.")
+print("HOME desactivado, liberación de Lock Task y versión 1.0.7 configurados.")
