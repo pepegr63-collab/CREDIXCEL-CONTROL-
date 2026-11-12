@@ -101,20 +101,18 @@ jobs:
               raise SystemExit("No se encontró el bloque HOME esperado; se cancela el parche.")
           s = s.replace(old, new, 1)
           anchor = "    private fun releaseKiosk(): String {"
-          helper = """    /** Opens the real Android launcher, never this app's own HOME activity. */
+          helper = """    /** Opens the real Android launcher, excluding CREDIXCEL's own HOME activity. */
           private fun openSystemHome(): Boolean {
-              val candidates = mutableListOf<android.content.pm.ResolveInfo>()
-              val preferred = packageManager.getHomeActivities(candidates)
-              val target = preferred?.takeIf { it.packageName != packageName }
-                  ?: candidates.firstOrNull { it.activityInfo.packageName != packageName }
-                      ?.activityInfo
-                      ?.let { android.content.ComponentName(it.packageName, it.name) }
-                  ?: return false
+              val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+              val launchers = packageManager.queryIntentActivities(homeIntent, 0)
+              val launcher = launchers.firstOrNull { it.activityInfo.packageName != this.packageName }
+                  ?.activityInfo ?: return false
+              val component = android.content.ComponentName(launcher.packageName, launcher.name)
 
               return runCatching {
                   startActivity(Intent(Intent.ACTION_MAIN).apply {
                       addCategory(Intent.CATEGORY_HOME)
-                      component = target
+                      this.component = component
                       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                   })
                   true
