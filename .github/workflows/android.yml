@@ -277,7 +277,7 @@ jobs:
           if old not in s:
               raise SystemExit("No se encontró la condición HOME de 1.1.1; no se modifica la fuente.")
           s = s.replace(old, new, 1)
-          if "val homeOpened = openSystemHome()" not in s or "finish()" not in s:
+          if "val homeOpened = cleanupConfirmed && openSystemHome()" not in s or "finish()" not in s:
               raise SystemExit("La corrección HOME no quedó aplicada.")
           main_path.write_text(s)
           b = build_path.read_text()
