@@ -1001,7 +1001,7 @@ jobs:
               worker_lines.insert(catch_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\n")
           worker = "".join(worker_lines)
 
-                    lines = main.splitlines(keepends=True)
+          lines = main.splitlines(keepends=True)
           status_index = next((i for i, line in enumerate(lines)
                                if "prefs.lastDeviceStatus = device" in line), None)
           if status_index is None:
