@@ -1220,6 +1220,82 @@ jobs:
           print("OK: autorización temporal, invalidación ante errores/estados inciertos y verificación real de Lock Task; 1.1.9.")
           PY
 
+      - name: Corregir selección del HOME real y versionar 1.2.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$BUILD" <<'PY'
+          import pathlib, sys
+          main_path, build_path = map(pathlib.Path, sys.argv[1:])
+          s = main_path.read_text()
+          anchor = "private fun openSystemHome(): Boolean"
+          start = s.find(anchor)
+          if start < 0: raise SystemExit("No se encontró openSystemHome.")
+          method_open = s.find("{", start)
+          depth = 0
+          end = -1
+          for pos in range(method_open, len(s)):
+              if s[pos] == "{": depth += 1
+              elif s[pos] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      end = pos + 1
+                      break
+          if end < 0: raise SystemExit("openSystemHome no tiene cierre.")
+          replacement = """private fun openSystemHome(): Boolean {
+              val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+              val resolved = packageManager.resolveActivity(
+                  homeIntent,
+                  PackageManager.MATCH_DEFAULT_ONLY
+              )?.activityInfo
+
+              fun isExternalHome(info: android.content.pm.ActivityInfo?): Boolean =
+                  info != null && info.packageName != packageName &&
+                      !info.name.endsWith(".ResolverActivity")
+
+              // CREDIXCEL is itself declared as HOME. Once its persistent preference is
+              // cleared, Android can resolve to ResolverActivity; select the real system
+              // launcher instead of treating the chooser as failure and restoring kiosk.
+              val systemHome = packageManager.queryIntentActivities(
+                  homeIntent, PackageManager.MATCH_DEFAULT_ONLY
+              ).filter { item ->
+                  val info = item.activityInfo
+                  isExternalHome(info) && runCatching {
+                      val app = packageManager.getApplicationInfo(info.packageName, 0)
+                      (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+                  }.getOrDefault(false)
+              }.sortedWith(
+                  compareByDescending<android.content.pm.ResolveInfo> { it.priority }
+                      .thenByDescending { it.isDefault }
+                      .thenByDescending { it.preferredOrder }
+                      .thenBy { it.activityInfo.packageName }
+              ).firstOrNull()?.activityInfo
+
+              val launcher = resolved?.takeIf { isExternalHome(it) } ?: systemHome ?: return false
+              val homeComponent = android.content.ComponentName(launcher.packageName, launcher.name)
+              return runCatching {
+                  startActivity(homeIntent.apply {
+                      component = homeComponent
+                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                  })
+                  true
+              }.getOrDefault(false)
+          }"""
+          s = s[:start] + replacement + s[end:]
+          if "queryIntentActivities(" not in s or "ApplicationInfo.FLAG_SYSTEM" not in s:
+              raise SystemExit("No quedó incorporada la selección alternativa del HOME.")
+          b = build_path.read_text()
+          if 'versionName = "1.1.9"' not in b or "versionCode = 20" not in b:
+              raise SystemExit("La fuente no coincide con 1.1.9 / código 20.")
+          b = b.replace("versionCode = 20", "versionCode = 21", 1)
+          b = b.replace('versionName = "1.1.9"', 'versionName = "1.2.0"', 1)
+          main_path.write_text(s)
+          build_path.write_text(b)
+          print("OK: selección del HOME real del sistema y versión 1.2.0.")
+          PY
+
       - name: Validar sincronización automática antes de publicar
         shell: bash
         run: |
@@ -1243,7 +1319,7 @@ jobs:
               "fallos de red invalidan liberación pendiente y reintentan": "Result.retry()" in worker and "prefs.pendingRelease = false" in worker,
               "estado incierto invalida liberación pendiente": "else -> {" in worker and "prefs.pendingRelease = false" in worker,
               "liberación valida los dos estados guardados": "Liberación cancelada: se requiere confirmación ACTIVE + ACTIVE reciente" in main,
-              "versión 1.1.9 / código 20": 'versionName = "1.1.9"' in build and "versionCode = 20" in build,
+              "versión 1.2.0 / código 21": 'versionName = "1.2.0"' in build and "versionCode = 21" in build,
           }
           for label, ok in checks.items():
               print(("OK: " if ok else "ERROR: ") + label)
@@ -1254,7 +1330,7 @@ jobs:
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.1.9
+          name: CREDIXCEL-Control-Fuente-1.2.0
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -1294,12 +1370,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.9.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.2.0.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.1.9-Release
-          path: CREDIXCEL-Control-1.1.9.apk
+          name: CREDIXCEL-Control-1.2.0-Release
+          path: CREDIXCEL-Control-1.2.0.apk
           if-no-files-found: error
           retention-days: 30
