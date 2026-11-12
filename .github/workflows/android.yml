@@ -907,6 +907,168 @@ jobs:
           print("OK: stale release authorization invalidated; version 1.1.8.")
           PY
 
+      - name: Endurecer autorización reciente y verificar Lock Task; versionar 1.1.9
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          PREFS="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/data/Prefs.kt"
+          WORKER="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/sync/ServerSyncWorker.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$PREFS" "$WORKER" "$BUILD" <<'PY'
+          import pathlib, sys
+          mp, pp, wp, bp = map(pathlib.Path, sys.argv[1:])
+          main, prefs, worker, build = [p.read_text() for p in (mp, pp, wp, bp)]
+          anchor = "    var lastDeviceStatus: String?"
+          if "var releaseAuthorizationAt: Long" not in prefs:
+              if anchor not in prefs: raise SystemExit("No se encontró inserción Prefs.")
+              prefs = prefs.replace(anchor, '''    /** Time of the latest authenticated ACTIVE + ACTIVE server response. */
+              var releaseAuthorizationAt: Long
+                  get() = p.getLong("release_authorization_at", 0L)
+                  set(value) { p.edit().putLong("release_authorization_at", value).commit() }
+
+          ''' + anchor, 1)
+
+          worker = worker.replace(
+              '        val id = prefs.deviceId ?: return Result.success()\n        val token = prefs.token ?: return Result.success()',
+              '''        val id = prefs.deviceId
+          val token = prefs.token
+          if (id.isNullOrBlank() || token.isNullOrBlank()) {
+              prefs.releaseAuthorizationAt = 0L
+              prefs.pendingRelease = false
+              return Result.success()
+          }''', 1)
+          worker = worker.replace('''                device == "LOCKED" -> {
+                    prefs.lockCommandReady = false''',
+              '''                device == "LOCKED" -> {
+                    prefs.releaseAuthorizationAt = 0L
+                    prefs.lockCommandReady = false''', 1)
+          worker = worker.replace('''                device == "ACTIVE" && contract == "ACTIVE" -> {
+                    val restrictionPresent''',
+              '''                device == "ACTIVE" && contract == "ACTIVE" -> {
+                    prefs.releaseAuthorizationAt = System.currentTimeMillis()
+                    val restrictionPresent''', 1)
+          worker = worker.replace('''                else -> {
+                    prefs.pendingRelease = false
+                }
+            }
+            Result.success()
+        } catch (_: Exception) {
+            prefs.pendingRelease = false''',
+              '''                else -> {
+                    prefs.releaseAuthorizationAt = 0L
+                    prefs.pendingRelease = false
+                }
+            }
+            Result.success()
+        } catch (_: Exception) {
+            prefs.releaseAuthorizationAt = 0L
+            prefs.pendingRelease = false''', 1)
+
+          manual_anchor = '''                                    prefs.lastDeviceStatus = device
+                                    prefs.lastContractStatus = contract
+                                    serverMessage = state.message.orEmpty()'''
+          manual_replacement = '''                                    prefs.lastDeviceStatus = device
+                                    prefs.lastContractStatus = contract
+                                    prefs.releaseAuthorizationAt =
+                                        if (device == "ACTIVE" && contract == "ACTIVE") System.currentTimeMillis() else 0L
+                                    serverMessage = state.message.orEmpty()'''
+          if manual_anchor not in main: raise SystemExit("No se encontró sync manual.")
+          main = main.replace(manual_anchor, manual_replacement, 1)
+
+          old_guard = '''        if (prefs.lastDeviceStatus?.trim()?.uppercase() != "ACTIVE" ||
+                    prefs.lastContractStatus?.trim()?.uppercase() != "ACTIVE") {
+                    prefs.pendingRelease = false
+                    return "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE. Se conserva la protección."
+                }'''
+          new_guard = '''        val authorizationAge = System.currentTimeMillis() - prefs.releaseAuthorizationAt
+                if (prefs.lastDeviceStatus?.trim()?.uppercase() != "ACTIVE" ||
+                    prefs.lastContractStatus?.trim()?.uppercase() != "ACTIVE" ||
+                    prefs.releaseAuthorizationAt <= 0L ||
+                    authorizationAge < 0L || authorizationAge > 5 * 60 * 1000L) {
+                    prefs.pendingRelease = false
+                    prefs.releaseAuthorizationAt = 0L
+                    return "Liberación cancelada: se requiere confirmación ACTIVE + ACTIVE reciente (máximo 5 minutos). Se conserva la protección."
+                }'''
+          if old_guard not in main: raise SystemExit("No se encontró guard de liberación 1.1.8.")
+          main = main.replace(old_guard, new_guard, 1)
+          main = main.replace('''                                } catch (e: Exception) {
+                                    prefs.pendingRelease = false
+                                    // Network/authentication failures''',
+              '''                                } catch (e: Exception) {
+                                    prefs.releaseAuthorizationAt = 0L
+                                    prefs.pendingRelease = false
+                                    // Network/authentication failures''', 1)
+
+          old_enter = '''    private fun enterLockTaskIfAuthorized() {
+            if (!DeviceActions.isDeviceOwner(this)) return
+            if (!DeviceActions.configureKiosk(this) || !DeviceActions.isLockTaskPermitted(this)) return
+            val manager = getSystemService(ActivityManager::class.java)
+            if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
+                runCatching { startLockTask() }
+            }
+        }'''
+          new_enter = '''    private fun enterLockTaskIfAuthorized(): Boolean {
+            if (!DeviceActions.isDeviceOwner(this)) return false
+            if (!DeviceActions.configureKiosk(this) || !DeviceActions.isLockTaskPermitted(this)) return false
+            return runCatching {
+                val manager = getSystemService(ActivityManager::class.java)
+                if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) startLockTask()
+                manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_LOCKED
+            }.getOrDefault(false)
+        }'''
+          if old_enter not in main: raise SystemExit("No se encontró enterLockTaskIfAuthorized.")
+          main = main.replace(old_enter, new_enter, 1)
+
+          old_resume = '''        if (DeviceActions.configureKiosk(this) && DeviceActions.isLockTaskPermitted(this)) {
+                    val manager = getSystemService(ActivityManager::class.java)
+                    if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
+                        runCatching { startLockTask() }
+                    }
+                }'''
+          new_resume = '''        if (!enterLockTaskIfAuthorized()) {
+                    Toast.makeText(this, "CREDIXCEL conserva la autorización LOCKED, pero Android aún no confirmó Lock Task.", Toast.LENGTH_LONG).show()
+                }'''
+          if old_resume not in main: raise SystemExit("No se encontró bloque onResume.")
+          main = main.replace(old_resume, new_resume, 1)
+
+          old_activate = '''                if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
+                        startLockTask()
+                    }
+                    if (policiesApplied) {'''
+          new_activate = '''                if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
+                        startLockTask()
+                    }
+                    if (manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_LOCKED) {
+                        return "La autorización LOCKED quedó guardada y las políticas aplicadas, pero Android no confirmó el modo Lock Task."
+                    }
+                    if (policiesApplied) {'''
+          if old_activate not in main: raise SystemExit("No se encontró startLockTask en activateKiosk.")
+          main = main.replace(old_activate, new_activate, 1)
+
+          main = main.replace(
+              'manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE\n                    }.getOrDefault(false)',
+              'manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_LOCKED\n                    }.getOrDefault(false)', 1
+          )
+
+          if 'versionName = "1.1.8"' not in build or "versionCode = 19" not in build:
+              raise SystemExit("Versión base distinta de 1.1.8 / código 19.")
+          build = build.replace("versionCode = 19", "versionCode = 20", 1)
+          build = build.replace('versionName = "1.1.8"', 'versionName = "1.1.9"', 1)
+
+          for token in ["releaseAuthorizationAt", "authorizationAge > 5 * 60 * 1000L",
+                        "LOCK_TASK_MODE_LOCKED", "enterLockTaskIfAuthorized(): Boolean"]:
+              if token not in main: raise SystemExit("Falta MainActivity: " + token)
+          for token in ["release_authorization_at", "var releaseAuthorizationAt: Long"]:
+              if token not in prefs: raise SystemExit("Falta Prefs: " + token)
+          for token in ["releaseAuthorizationAt = System.currentTimeMillis()", "releaseAuthorizationAt = 0L"]:
+              if token not in worker: raise SystemExit("Falta Worker: " + token)
+          if 'versionName = "1.1.9"' not in build or "versionCode = 20" not in build:
+              raise SystemExit("Versionado 1.1.9 incompleto.")
+          mp.write_text(main); pp.write_text(prefs); wp.write_text(worker); bp.write_text(build)
+          print("OK: autorización temporal, invalidación ante errores/estados inciertos y verificación real de Lock Task; 1.1.9.")
+          PY
+
       - name: Validar sincronización automática antes de publicar
         shell: bash
         run: |
@@ -930,7 +1092,7 @@ jobs:
               "fallos de red invalidan liberación pendiente y reintentan": "Result.retry()" in worker and "prefs.pendingRelease = false" in worker,
               "estado incierto invalida liberación pendiente": "else -> {" in worker and "prefs.pendingRelease = false" in worker,
               "liberación valida los dos estados guardados": "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" in main,
-              "versión 1.1.8 / código 19": 'versionName = "1.1.8"' in build and "versionCode = 19" in build,
+              "versión 1.1.9 / código 20": 'versionName = "1.1.9"' in build and "versionCode = 20" in build,
           }
           for label, ok in checks.items():
               print(("OK: " if ok else "ERROR: ") + label)
@@ -941,7 +1103,7 @@ jobs:
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.1.8
+          name: CREDIXCEL-Control-Fuente-1.1.9
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -981,12 +1143,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.8.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.9.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.1.8-Release
+          name: CREDIXCEL-Control-1.1.9-Release
           path: CREDIXCEL-Control-1.1.8.apk
           if-no-files-found: error
           retention-days: 30
