@@ -59,7 +59,7 @@ helper = '''
         } catch (_: Exception) { false }
     }
 '''
-helper_pat = r'(?ms)^    fun updateManagedLockAllowlist\(context: Context, locked: Boolean\): Boolean \{.*?^    \}'
+helper_pat = r'(?s)\s*fun updateManagedLockAllowlist\(context: Context, locked: Boolean\): Boolean \{.*?(?=\n\s*fun lock\(context: Context\): Boolean \{)'
 if re.search(helper_pat, d):
     d = re.sub(helper_pat, helper.strip('\n'), d, count=1)
 else:
@@ -115,7 +115,7 @@ if 'LaunchedEffect(hasCredentials)' not in a:
                                 info = "ACTIVE confirmado, pero Android no permitió retirar el modo administrado."
                             }
                         }
-                        else -> info = "Estado consultado: \${state.status} / contrato \${state.contractStatus}. No se modificó la restricción."
+                        else -> info = "Estado consultado: " + state.status + " / contrato " + state.contractStatus + ". No se modificó la restricción."
                     }
                 } catch (_: Exception) {
                     info = "Sin conexión para verificar el estado; se conserva la última restricción conocida."
