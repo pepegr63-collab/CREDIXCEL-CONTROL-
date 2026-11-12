@@ -1070,19 +1070,33 @@ jobs:
                   }'''
           main = main[:resume_start] + new_resume + main[resume_end:]
 
-          old_activate = '''                if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
-                        startLockTask()
-                    }
-                    if (policiesApplied) {'''
-          new_activate = '''                if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
-                        startLockTask()
-                    }
+          # Add the real Lock Task confirmation inside activateKiosk without matching indentation.
+          activate_token = "activateKiosk("
+          activate_pos = main.find(activate_token)
+          if activate_pos < 0: raise SystemExit("No se encontró activateKiosk.")
+          activate_open = main.find("{", activate_pos)
+          depth = 0
+          activate_end = -1
+          for pos in range(activate_open, len(main)):
+              if main[pos] == "{": depth += 1
+              elif main[pos] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      activate_end = pos
+                      break
+          if activate_end < 0: raise SystemExit("activateKiosk sin cierre.")
+          activate_body = main[activate_pos:activate_end]
+          lock_call = "startLockTask()"
+          lock_pos = activate_body.find(lock_call)
+          if lock_pos < 0: raise SystemExit("activateKiosk no contiene startLockTask().")
+          after_call = lock_pos + len(lock_call)
+          guard = '''
                     if (manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_LOCKED) {
                         return "La autorización LOCKED quedó guardada y las políticas aplicadas, pero Android no confirmó el modo Lock Task."
-                    }
-                    if (policiesApplied) {'''
-          if old_activate not in main: raise SystemExit("No se encontró startLockTask en activateKiosk.")
-          main = main.replace(old_activate, new_activate, 1)
+                    }'''
+          if "Android no confirmó el modo Lock Task." not in activate_body:
+              activate_body = activate_body[:after_call] + guard + activate_body[after_call:]
+              main = main[:activate_pos] + activate_body + main[activate_end:]
 
           main = main.replace(
               'manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE\n                    }.getOrDefault(false)',
