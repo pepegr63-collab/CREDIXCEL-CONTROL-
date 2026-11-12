@@ -417,10 +417,314 @@ jobs:
               raise SystemExit("La validación de liberación transaccional falló.")
           PY
 
+      - name: Incorporar sincronización automática segura y versionar 1.1.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          PREFS="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/data/Prefs.kt"
+          MANIFEST="$PROJECT_DIR/android/app/src/main/AndroidManifest.xml"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          WORKER_DIR="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/sync"
+          mkdir -p "$WORKER_DIR"
+          cat > "$WORKER_DIR/ServerSyncWorker.kt" <<'KOTLIN'
+          package com.credixcel.control.sync
+
+          import android.Manifest
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.os.Build
+          import androidx.core.app.NotificationCompat
+          import androidx.core.app.NotificationManagerCompat
+          import androidx.core.content.ContextCompat
+          import androidx.work.CoroutineWorker
+          import androidx.work.WorkerParameters
+          import com.credixcel.control.MainActivity
+          import com.credixcel.control.data.Prefs
+          import com.credixcel.control.device.DeviceActions
+          import com.credixcel.control.network.CredixcelApi
+          import kotlinx.serialization.json.Json
+          import okhttp3.OkHttpClient
+          import okhttp3.MediaType.Companion.toMediaType
+          import retrofit2.Retrofit
+          import retrofit2.converter.kotlinx.serialization.asConverterFactory
+          import java.net.URL
+
+          /**
+           * Periodically reads server authorization. It never attempts to stop Lock Task
+           * or launch an Activity from the background: Android requires the foreground
+           * Activity to complete those operations safely.
+           */
+          class ServerSyncWorker(
+              appContext: Context,
+              params: WorkerParameters
+          ) : CoroutineWorker(appContext, params) {
+
+              override suspend fun doWork(): Result {
+                  val prefs = Prefs(applicationContext)
+                  val id = prefs.deviceId ?: return Result.success()
+                  val token = prefs.token ?: return Result.success()
+
+                  return try {
+                      val state = api(prefs.serverUrl).sync(
+                          mapOf("deviceId" to id, "deviceToken" to token)
+                      )
+                      val device = state.status.trim().uppercase()
+                      val contract = state.contractStatus?.trim()?.uppercase()
+                      prefs.lastDeviceStatus = device
+                      prefs.lastContractStatus = contract
+
+                      when {
+                          device == "LOCKED" -> {
+                              // Persist the command and DPM policies before asking the user
+                              // to bring the HOME Activity forward to enter Lock Task.
+                              prefs.pendingRelease = false
+                              prefs.protectionActive = true
+                              val policies = DeviceActions.applyFinancingProtection(applicationContext)
+                              val kiosk = DeviceActions.configureKiosk(applicationContext) &&
+                                  DeviceActions.isLockTaskPermitted(applicationContext)
+                              if (!policies || !kiosk) return Result.retry()
+                              postActionNotification(
+                                  applicationContext,
+                                  "CREDIXCEL: bloqueo autorizado",
+                                  "Toca esta notificación para activar Lock Task."
+                              )
+                          }
+                          device == "ACTIVE" && contract == "ACTIVE" -> {
+                              val restrictionPresent = prefs.protectionActive ||
+                                  DeviceActions.isLockTaskPermitted(applicationContext)
+                              if (restrictionPresent) {
+                                  val newlyPending = !prefs.pendingRelease
+                                  prefs.pendingRelease = true
+                                  if (newlyPending) {
+                                      postActionNotification(
+                                          applicationContext,
+                                          "CREDIXCEL: equipo autorizado para liberar",
+                                          "Toca esta notificación para volver al HOME normal del Motorola."
+                                      )
+                                  }
+                              } else {
+                                  prefs.pendingRelease = false
+                              }
+                          }
+                          // Unknown, overdue, partial, and network/auth errors never release.
+                          else -> Unit
+                      }
+                      Result.success()
+                  } catch (_: Exception) {
+                      Result.retry()
+                  }
+              }
+
+              private fun api(rawUrl: String): CredixcelApi {
+                  val normalized = rawUrl.trim().trimEnd('/')
+                  require(normalized.startsWith("https://", ignoreCase = true))
+                  val parsed = URL(normalized)
+                  require(parsed.host.isNotBlank())
+                  val json = Json { ignoreUnknownKeys = true }
+                  return Retrofit.Builder()
+                      .baseUrl("$normalized/")
+                      .client(OkHttpClient.Builder().build())
+                      .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+                      .build()
+                      .create(CredixcelApi::class.java)
+              }
+
+              private fun postActionNotification(context: Context, title: String, message: String) {
+                  if (Build.VERSION.SDK_INT >= 33 &&
+                      ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                      PackageManager.PERMISSION_GRANTED) return
+
+                  val manager = context.getSystemService(NotificationManager::class.java)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      manager.createNotificationChannel(
+                          NotificationChannel(CHANNEL_ID, "Estado CREDIXCEL", NotificationManager.IMPORTANCE_HIGH)
+                      )
+                  }
+                  val intent = Intent(context, MainActivity::class.java).apply {
+                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                  }
+                  val pending = PendingIntent.getActivity(
+                      context, NOTIFICATION_ID, intent,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+                  val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                      .setSmallIcon(android.R.drawable.ic_lock_lock)
+                      .setContentTitle(title)
+                      .setContentText(message)
+                      .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+                      .setContentIntent(pending)
+                      .setAutoCancel(true)
+                      .setPriority(NotificationCompat.PRIORITY_HIGH)
+                      .build()
+                  NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+              }
+
+              companion object {
+                  const val WORK_NAME = "credixcel_server_sync"
+                  private const val CHANNEL_ID = "credixcel_authorization"
+                  private const val NOTIFICATION_ID = 4101
+              }
+          }
+          KOTLIN
+
+          python3 - "$MAIN" "$PREFS" "$MANIFEST" "$BUILD" <<'PY'
+          import pathlib, sys
+          main_path, prefs_path, manifest_path, build_path = map(pathlib.Path, sys.argv[1:])
+          main = main_path.read_text()
+          prefs = prefs_path.read_text()
+          manifest = manifest_path.read_text()
+          build = build_path.read_text()
+
+          # Add durable pending-release marker.
+          if 'var pendingRelease:' not in prefs:
+              anchor = '    var lastDeviceStatus: String?'
+              if anchor not in prefs:
+                  raise SystemExit("No se encontró el punto de inserción de Prefs.")
+              prefs = prefs.replace(anchor, '''    /** Server approved release; the foreground Activity must finish Lock Task and HOME handoff. */
+              var pendingRelease: Boolean
+                  get() = p.getBoolean("pending_release", false)
+                  set(value) { p.edit().putBoolean("pending_release", value).commit() }
+
+              ''' + anchor, 1)
+
+          # Schedule a network-constrained periodic sync; WorkManager persists it across reboot.
+          imports = [
+              "import androidx.work.Constraints",
+              "import androidx.work.ExistingPeriodicWorkPolicy",
+              "import androidx.work.NetworkType",
+              "import androidx.work.PeriodicWorkRequestBuilder",
+              "import androidx.work.WorkManager",
+              "import com.credixcel.control.sync.ServerSyncWorker",
+              "import java.util.concurrent.TimeUnit",
+              "import android.widget.Toast",
+          ]
+          for item in imports:
+              if item not in main:
+                  main = main.replace("import android.app.ActivityManager", "import android.app.ActivityManager\n" + item, 1)
+
+          if "scheduleServerSync()" not in main:
+              main = main.replace(
+                  "        setContent { App(prefs) }",
+                  "        scheduleServerSync()\n        setContent { App(prefs) }",
+                  1
+              )
+          if "private fun scheduleServerSync()" not in main:
+              anchor = "    /** A previously authorized kiosk is re-entered whenever Android recreates this HOME activity. */"
+              method = '''    /** WorkManager checks the server at Android's minimum periodic interval (15 minutes). */
+              private fun scheduleServerSync() {
+                  val constraints = Constraints.Builder()
+                      .setRequiredNetworkType(NetworkType.CONNECTED)
+                      .build()
+                  val request = PeriodicWorkRequestBuilder<ServerSyncWorker>(15, TimeUnit.MINUTES)
+                      .setConstraints(constraints)
+                      .build()
+                  WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+                      ServerSyncWorker.WORK_NAME,
+                      ExistingPeriodicWorkPolicy.UPDATE,
+                      request
+                  )
+              }
+
+              '''
+              if anchor not in main:
+                  raise SystemExit("No se encontró onResume para insertar la programación periódica.")
+              main = main.replace(anchor, method + anchor, 1)
+
+          # A pending ACTIVE+ACTIVE command is completed only while this Activity is foreground.
+          old_resume = '''        if (!::prefs.isInitialized || !prefs.protectionActive) return
+
+              if (DeviceActions.configureKiosk(this) && DeviceActions.isLockTaskPermitted(this)) {'''
+          new_resume = '''        if (!::prefs.isInitialized) return
+              if (prefs.pendingRelease) {
+                  val result = releaseKiosk()
+                  if (prefs.pendingRelease) {
+                      Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+                  }
+                  return
+              }
+              if (!prefs.protectionActive) return
+
+              if (DeviceActions.configureKiosk(this) && DeviceActions.isLockTaskPermitted(this)) {'''
+          if old_resume not in main:
+              raise SystemExit("No se encontró el onResume esperado para priorizar la liberación pendiente.")
+          main = main.replace(old_resume, new_resume, 1)
+
+          if "prefs.pendingRelease = false" not in main:
+              main = main.replace(
+                  "                  prefs.protectionActive = false\n                  finish()",
+                  "                  prefs.protectionActive = false\n                  prefs.pendingRelease = false\n                  finish()",
+                  1
+              )
+          if "prefs.pendingRelease = false" not in main:
+              raise SystemExit("No se pudo limpiar el marcador tras liberar correctamente.")
+
+          if "android.permission.POST_NOTIFICATIONS" not in manifest:
+              manifest = manifest.replace(
+                  '    <uses-permission android:name="android.permission.INTERNET" />',
+                  '    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+                  1
+              )
+
+          if "versionCode = 16" not in build or 'versionName = "1.1.5"' not in build:
+              raise SystemExit("La fuente no coincide con 1.1.5 antes del versionado.")
+          build = build.replace("versionCode = 16", "versionCode = 17", 1)
+          build = build.replace('versionName = "1.1.5"', 'versionName = "1.1.6"', 1)
+
+          # Assertions validate the actual patched files.
+          assert "PeriodicWorkRequestBuilder<ServerSyncWorker>(15, TimeUnit.MINUTES)" in main
+          assert "ExistingPeriodicWorkPolicy.UPDATE" in main
+          assert "if (prefs.pendingRelease)" in main
+          assert "prefs.pendingRelease = false" in main
+          assert "var pendingRelease: Boolean" in prefs
+          assert 'device == "ACTIVE" && contract == "ACTIVE"' in pathlib.Path(sys.argv[1]).read_text()
+          assert "POST_NOTIFICATIONS" in manifest
+          assert 'versionName = "1.1.6"' in build and "versionCode = 17" in build
+
+          main_path.write_text(main)
+          prefs_path.write_text(prefs)
+          manifest_path.write_text(manifest)
+          build_path.write_text(build)
+          print("OK: sincronización periódica, comandos durables y liberación solo en Activity visible; versión 1.1.6.")
+          PY
+
+      - name: Validar sincronización automática antes de publicar
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          PREFS="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/data/Prefs.kt"
+          WORKER="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/sync/ServerSyncWorker.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          test -s "$WORKER"
+          python3 - "$MAIN" "$PREFS" "$WORKER" "$BUILD" <<'PY'
+          import pathlib, sys
+          main, prefs, worker, build = [pathlib.Path(x).read_text() for x in sys.argv[1:]]
+          checks = {
+              "WorkManager periódico cada 15 minutos": "PeriodicWorkRequestBuilder<ServerSyncWorker>(15, TimeUnit.MINUTES)" in main,
+              "requiere conectividad": "NetworkType.CONNECTED" in main,
+              "marcador de liberación persistente": "pending_release" in prefs,
+              "ACTIVE + ACTIVE crea liberación pendiente": 'device == "ACTIVE" && contract == "ACTIVE"' in worker and "prefs.pendingRelease = true" in worker,
+              "LOCKED conserva y configura protección": 'device == "LOCKED"' in worker and "prefs.protectionActive = true" in worker and "configureKiosk" in worker,
+              "Worker no intenta detener Lock Task en segundo plano": "stopLockTask()" not in worker,
+              "Activity visible completa la liberación": "if (prefs.pendingRelease)" in main and "releaseKiosk()" in main,
+              "fallos de red reintentan sin liberar": "Result.retry()" in worker,
+              "versión 1.1.6 / código 17": 'versionName = "1.1.6"' in build and "versionCode = 17" in build,
+          }
+          for label, ok in checks.items():
+              print(("OK: " if ok else "ERROR: ") + label)
+          if not all(checks.values()):
+              raise SystemExit("Falló la validación de sincronización automática.")
+          PY
+
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.1.5
+          name: CREDIXCEL-Control-Fuente-1.1.6
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -460,12 +764,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.5.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.6.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.1.5-Release
+          name: CREDIXCEL-Control-1.1.6-Release
           path: CREDIXCEL-Control-1.1.5.apk
           if-no-files-found: error
           retention-days: 30
