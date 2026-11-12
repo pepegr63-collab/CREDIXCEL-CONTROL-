@@ -1091,7 +1091,7 @@ jobs:
               "Activity visible completa la liberación": "if (prefs.pendingRelease)" in main and "releaseKiosk()" in main,
               "fallos de red invalidan liberación pendiente y reintentan": "Result.retry()" in worker and "prefs.pendingRelease = false" in worker,
               "estado incierto invalida liberación pendiente": "else -> {" in worker and "prefs.pendingRelease = false" in worker,
-              "liberación valida los dos estados guardados": "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" in main,
+              "liberación valida los dos estados guardados": "Liberación cancelada: se requiere confirmación ACTIVE + ACTIVE reciente" in main,
               "versión 1.1.9 / código 20": 'versionName = "1.1.9"' in build and "versionCode = 20" in build,
           }
           for label, ok in checks.items():
@@ -1149,6 +1149,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CREDIXCEL-Control-1.1.9-Release
-          path: CREDIXCEL-Control-1.1.8.apk
+          path: CREDIXCEL-Control-1.1.9.apk
           if-no-files-found: error
           retention-days: 30
