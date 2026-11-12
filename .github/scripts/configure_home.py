@@ -124,7 +124,7 @@ if "LaunchedEffect(hasCredentials)" not in a:
                     contractStatus = state.contractStatus
                     serverMessage = state.message.orEmpty()
                     when {
-                        state.status.equals("LOCKED", true) && state.contractStatus.equals("ACTIVE", true) -> {
+                        state.status.equals("LOCKED", true) -> {
                             val applied = DeviceActions.enterManagedLock(this@MainActivity)
                             prefs.isRestricted = applied
                             isRestricted = applied
@@ -166,9 +166,9 @@ for line in lines:
 main.write_text("\n".join(out) + "\n")
 
 b = build.read_text()
-b, n1 = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>9', b, count=1)
-b, n2 = re.subn(r'(?m)^(\s*versionName\s*=\s*)"[^"]+"', r'\g<1>"1.0.8"', b, count=1)
+b, n1 = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>10', b, count=1)
+b, n2 = re.subn(r'(?m)^(\s*versionName\s*=\s*)"[^"]+"', r'\g<1>"1.0.9"', b, count=1)
 if n1 != 1 or n2 != 1:
     raise SystemExit(f"No se pudo versionar: code={n1}, name={n2}")
 build.write_text(b)
-print("Configurado HOME temporal, recuperación de Lock Task al reinicio y liberación solo con ambos estados ACTIVE. Versión 1.0.8.")
+print("Configurado HOME temporal, recuperación de Lock Task al reinicio y liberación solo con ambos estados ACTIVE. Versión 1.0.9.")
