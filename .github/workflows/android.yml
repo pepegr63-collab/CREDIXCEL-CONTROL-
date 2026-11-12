@@ -475,6 +475,15 @@ jobs:
           PY
           grep -n -E 'BootReceiver|RECEIVE_BOOT_COMPLETED' "$APP/AndroidManifest.xml"
           grep -n -E 'updateManagedLockAllowlist|isRestricted|lastSyncStatus' "$PKG/device/DeviceActions.kt" "$PKG/data/Prefs.kt" "$PKG/MainActivity.kt"
+      - name: Configurar arranque HOME persistente y sincronización al abrir
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/configure_home.py "$PROJECT_DIR"
+          grep -n -E 'android.intent.category.HOME|android.intent.category.DEFAULT' "$PROJECT_DIR/android/app/src/main/AndroidManifest.xml"
+          grep -n -E 'addPersistentPreferredActivity|clearPackagePersistentPreferredActivities|updateManagedLockAllowlist' "$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/device/DeviceActions.kt"
+          grep -n -E 'LaunchedEffect\(hasCredentials\)|prefs.isRestricted' "$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+
       - name: Preparar firma
         shell: bash
         run: |
