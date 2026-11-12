@@ -110,7 +110,7 @@ app.post('/api/device/sync', async (req, res, next) => {
     const row = result.rows[0];
     if (!row) return res.status(401).json({ error: 'Unauthorized device' });
     await pool.query('UPDATE devices SET updated_at=$1 WHERE id=$2', [now(), deviceId]);
-    res.json({ deviceId: row.id, status: row.status, message: row.message || '', uninstallBlocked: Boolean(row.uninstall_blocked), contractStatus: row.contract_status || 'ACTIVE', updatedAt: row.updated_at });
+    res.json({ deviceId: row.id, status: row.status, message: row.message || '', uninstallBlocked: Boolean(row.uninstall_blocked), contractStatus: row.contract_status || 'UNKNOWN', updatedAt: row.updated_at });
   } catch (e) { next(e); }
 });
 
