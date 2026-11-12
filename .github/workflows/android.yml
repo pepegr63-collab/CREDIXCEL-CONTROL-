@@ -1023,37 +1023,52 @@ jobs:
                                     prefs.pendingRelease = false
                                     // Network/authentication failures''', 1)
 
-          old_enter = '''    private fun enterLockTaskIfAuthorized() {
-            if (!DeviceActions.isDeviceOwner(this)) return
-            if (!DeviceActions.configureKiosk(this) || !DeviceActions.isLockTaskPermitted(this)) return
-            val manager = getSystemService(ActivityManager::class.java)
-            if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
-                runCatching { startLockTask() }
-            }
-          }'''
+          # Replace the method by locating its signature and matching braces; whitespace is irrelevant.
+          method_signature = "private fun enterLockTaskIfAuthorized()"
+          method_start = main.find(method_signature)
+          if method_start < 0: raise SystemExit("No se encontró la firma enterLockTaskIfAuthorized.")
+          method_line_start = main.rfind("\\n", 0, method_start) + 1
+          method_open = main.find("{", method_start)
+          if method_open < 0: raise SystemExit("Método enterLockTaskIfAuthorized sin apertura.")
+          depth = 0
+          method_end = -1
+          for pos in range(method_open, len(main)):
+              if main[pos] == "{": depth += 1
+              elif main[pos] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      method_end = pos + 1
+                      break
+          if method_end < 0: raise SystemExit("Método enterLockTaskIfAuthorized sin cierre.")
           new_enter = '''    private fun enterLockTaskIfAuthorized(): Boolean {
-            if (!DeviceActions.isDeviceOwner(this)) return false
-            if (!DeviceActions.configureKiosk(this) || !DeviceActions.isLockTaskPermitted(this)) return false
-            return runCatching {
-                val manager = getSystemService(ActivityManager::class.java)
-                if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) startLockTask()
-                manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_LOCKED
-            }.getOrDefault(false)
+              if (!DeviceActions.isDeviceOwner(this)) return false
+              if (!DeviceActions.configureKiosk(this) || !DeviceActions.isLockTaskPermitted(this)) return false
+              return runCatching {
+                  val manager = getSystemService(ActivityManager::class.java)
+                  if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) startLockTask()
+                  manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_LOCKED
+              }.getOrDefault(false)
           }'''
-          if old_enter not in main: raise SystemExit("No se encontró enterLockTaskIfAuthorized.")
-          main = main.replace(old_enter, new_enter, 1)
+          main = main[:method_line_start] + new_enter + main[method_end:]
 
-          old_resume = '''        if (DeviceActions.configureKiosk(this) && DeviceActions.isLockTaskPermitted(this)) {
-                    val manager = getSystemService(ActivityManager::class.java)
-                    if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
-                        runCatching { startLockTask() }
-                    }
-                }'''
-          new_resume = '''        if (!enterLockTaskIfAuthorized()) {
-                    Toast.makeText(this, "CREDIXCEL conserva la autorización LOCKED, pero Android aún no confirmó Lock Task.", Toast.LENGTH_LONG).show()
-                }'''
-          if old_resume not in main: raise SystemExit("No se encontró bloque onResume.")
-          main = main.replace(old_resume, new_resume, 1)
+          resume_anchor = "if (DeviceActions.configureKiosk(this) && DeviceActions.isLockTaskPermitted(this))"
+          resume_start = main.find(resume_anchor)
+          if resume_start < 0: raise SystemExit("No se encontró condición de Lock Task en onResume.")
+          resume_open = main.find("{", resume_start)
+          depth = 0
+          resume_end = -1
+          for pos in range(resume_open, len(main)):
+              if main[pos] == "{": depth += 1
+              elif main[pos] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      resume_end = pos + 1
+                      break
+          if resume_end < 0: raise SystemExit("Bloque Lock Task de onResume sin cierre.")
+          new_resume = '''if (!enterLockTaskIfAuthorized()) {
+                      Toast.makeText(this, "CREDIXCEL conserva la autorización LOCKED, pero Android aún no confirmó Lock Task.", Toast.LENGTH_LONG).show()
+                  }'''
+          main = main[:resume_start] + new_resume + main[resume_end:]
 
           old_activate = '''                if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
                         startLockTask()
