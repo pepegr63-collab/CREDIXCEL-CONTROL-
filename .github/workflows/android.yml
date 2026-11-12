@@ -856,6 +856,57 @@ jobs:
           print("OK: permiso de notificaciones Android 13+, listener de comandos en Activity visible, señal de bloqueo listo y versión 1.1.7.")
           PY
 
+      - name: Corregir autorización obsoleta de liberación; versionar 1.1.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          WORKER="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/sync/ServerSyncWorker.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$WORKER" "$BUILD" <<'PY'
+          import pathlib, sys
+          main_path, worker_path, build_path = map(pathlib.Path, sys.argv[1:])
+          main, worker, build = [p.read_text() for p in (main_path, worker_path, build_path)]
+          anchor = "    private fun releaseKiosk(): String {"
+          guard = '''    private fun releaseKiosk(): String {
+                  if (prefs.lastDeviceStatus?.trim()?.uppercase() != "ACTIVE" ||
+                      prefs.lastContractStatus?.trim()?.uppercase() != "ACTIVE") {
+                      prefs.pendingRelease = false
+                      return "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE. Se conserva la protección."
+                  }'''
+          if anchor not in main: raise SystemExit("No se encontró releaseKiosk.")
+          if "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" not in main:
+              main = main.replace(anchor, guard, 1)
+          old_else = '                                        else -> if (prefs.protectionActive) {'
+          new_else = '                                        else -> {\\n                                            prefs.pendingRelease = false\\n                                            if (prefs.protectionActive) {'
+          if old_else not in main: raise SystemExit("No se encontró rama manual incierta.")
+          main = main.replace(old_else, new_else, 1)
+          # Close the new else block after the existing if/else expression.
+          close_old = '                                        }\\n                                    }\\n                                } catch (e: Exception) {'
+          close_new = '                                            }\\n                                        }\\n                                    }\\n                                } catch (e: Exception) {'
+          if close_old not in main: raise SystemExit("No se encontró cierre de rama manual.")
+          main = main.replace(close_old, close_new, 1)
+          old_catch = '                                } catch (e: Exception) {\\n                                    // Network/authentication failures never clear a previously authorized local restriction.'
+          new_catch = '                                } catch (e: Exception) {\\n                                    prefs.pendingRelease = false\\n                                    // Network/authentication failures never clear a previously authorized local restriction.'
+          if old_catch not in main: raise SystemExit("No se encontró catch manual.")
+          main = main.replace(old_catch, new_catch, 1)
+          if "else -> Unit" not in worker: raise SystemExit("No se encontró else -> Unit.")
+          worker = worker.replace("else -> Unit", "else -> {\\n                    prefs.pendingRelease = false\\n                }", 1)
+          old_wc = '        } catch (_: Exception) {\\n            Result.retry()'
+          new_wc = '        } catch (_: Exception) {\\n            prefs.pendingRelease = false\\n            Result.retry()'
+          if old_wc not in worker: raise SystemExit("No se encontró catch Worker.")
+          worker = worker.replace(old_wc, new_wc, 1)
+          if 'versionName = "1.1.7"' not in build or "versionCode = 18" not in build:
+              raise SystemExit("La versión base no coincide con 1.1.7 / código 18.")
+          build = build.replace("versionCode = 18", "versionCode = 19", 1)
+          build = build.replace('versionName = "1.1.7"', 'versionName = "1.1.8"', 1)
+          assert "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" in main
+          assert "prefs.pendingRelease = false" in worker
+          assert 'versionName = "1.1.8"' in build and "versionCode = 19" in build
+          main_path.write_text(main); worker_path.write_text(worker); build_path.write_text(build)
+          print("OK: stale release authorization invalidated; version 1.1.8.")
+          PY
+
       - name: Validar sincronización automática antes de publicar
         shell: bash
         run: |
@@ -876,8 +927,8 @@ jobs:
               "LOCKED conserva y configura protección": 'device == "LOCKED"' in worker and "prefs.protectionActive = true" in worker and "configureKiosk" in worker,
               "Worker no intenta detener Lock Task en segundo plano": "stopLockTask()" not in worker,
               "Activity visible completa la liberación": "if (prefs.pendingRelease)" in main and "releaseKiosk()" in main,
-              "fallos de red reintentan sin liberar": "Result.retry()" in worker,
-              "versión 1.1.7 / código 17": 'versionName = "1.1.7"' in build and "versionCode = 18" in build,
+              "fallos de red invalidan liberación pendiente y reintentan": "Result.retry()" in worker and "prefs.pendingRelease = false" in worker,\n              "estado incierto invalida liberación pendiente": "else -> {" in worker and "prefs.pendingRelease = false" in worker,\n              "liberación valida los dos estados guardados": "Liberación cancelada: el último estado confirmado no es ACTIVE + ACTIVE" in main,
+              "versión 1.1.8 / código 19": 'versionName = "1.1.8"' in build and "versionCode = 19" in build,
           }
           for label, ok in checks.items():
               print(("OK: " if ok else "ERROR: ") + label)
@@ -888,7 +939,7 @@ jobs:
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.1.7
+          name: CREDIXCEL-Control-Fuente-1.1.8
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -928,12 +979,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.7.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.8.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.1.7-Release
+          name: CREDIXCEL-Control-1.1.8-Release
           path: CREDIXCEL-Control-1.1.7.apk
           if-no-files-found: error
           retention-days: 30
