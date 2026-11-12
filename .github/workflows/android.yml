@@ -120,8 +120,23 @@ jobs:
                   homeIntent,
                   android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
               )
-              val launcher = candidates
-                  .firstOrNull { it.activityInfo.packageName != this.packageName }
+              val resolvedLauncher = packageManager.resolveActivity(
+                  homeIntent,
+                  android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+              )?.activityInfo
+              val launcher = resolvedLauncher?.takeIf {
+                  it.packageName != this.packageName &&
+                      !it.name.endsWith(".ResolverActivity")
+              } ?: candidates
+                  .filter {
+                      it.activityInfo.packageName != this.packageName &&
+                          !it.activityInfo.name.endsWith(".ResolverActivity")
+                  }
+                  .sortedWith(
+                      compareByDescending<android.content.pm.ResolveInfo> { it.priority }
+                          .thenByDescending { it.preferredOrder }
+                  )
+                  .firstOrNull()
                   ?.activityInfo ?: return false
               val component = android.content.ComponentName(launcher.packageName, launcher.name)
 
@@ -184,8 +199,8 @@ jobs:
               raise SystemExit("No se encontró el bloque de confirmación de liberación esperado.")
           s = s.replace(old, new, 1)
           # Verify the selector patched in the preceding step without brittle indentation matching.
-          if 'firstOrNull { it.activityInfo.packageName != this.packageName }' not in s:
-              raise SystemExit("No se encontró el selector HOME externo después del parche.")
+          if 'packageManager.resolveActivity(' not in s or 'it.name.endsWith(".ResolverActivity")' not in s:
+              raise SystemExit("No se encontró la resolución del HOME preferido después del parche.")
           old_active = 'device == "ACTIVE" && contract == "ACTIVE" -> releaseKiosk()'
           new_active = '''device == "ACTIVE" && contract == "ACTIVE" -> {
                                               val manager = getSystemService(ActivityManager::class.java)
@@ -227,7 +242,8 @@ jobs:
           assert 'device == "ACTIVE" && contract == "ACTIVE" -> {' in final
           assert 'DeviceActions.isLockTaskPermitted(this@MainActivity)' in final
           assert 'policiesReleased && homeOpened' in final
-          assert 'firstOrNull { it.activityInfo.packageName != this.packageName }' in final
+          assert 'packageManager.resolveActivity(' in final
+          assert 'it.name.endsWith(".ResolverActivity")' in final
           assert '<queries>' in manifest_path.read_text()
           print("OK: liberación solo con HOME externo confirmado, sin redirección al sincronizar un equipo ya ACTIVE, visibilidad HOME declarada y versión 1.1.1.")
           PY
