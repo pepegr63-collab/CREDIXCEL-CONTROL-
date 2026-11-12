@@ -976,7 +976,32 @@ jobs:
               worker_lines.insert(active_idx + 1, indent + "prefs.releaseAuthorizationAt = System.currentTimeMillis()\n")
               worker = "".join(worker_lines)
 
-          lines = main.splitlines(keepends=True)
+          # Endurecer invalidación de autorizaciones ante estados inciertos y fallos.
+          worker_lines = worker.splitlines(keepends=True)
+          locked_idx = next((i for i, line in enumerate(worker_lines)
+                             if 'device == "LOCKED" -> {' in line), None)
+          if locked_idx is None:
+              raise SystemExit("No se encontró rama LOCKED para invalidar autorización.")
+          if not any("releaseAuthorizationAt = 0L" in line for line in worker_lines[locked_idx + 1:locked_idx + 5]):
+              indent = worker_lines[locked_idx][:len(worker_lines[locked_idx]) - len(worker_lines[locked_idx].lstrip())] + "    "
+              worker_lines.insert(locked_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\\n")
+          else_idx = next((i for i, line in enumerate(worker_lines)
+                           if line.strip() == "else -> {"), None)
+          if else_idx is None:
+              raise SystemExit("No se encontró rama de estado incierto del Worker.")
+          if not any("releaseAuthorizationAt = 0L" in line for line in worker_lines[else_idx + 1:else_idx + 4]):
+              indent = worker_lines[else_idx][:len(worker_lines[else_idx]) - len(worker_lines[else_idx].lstrip())] + "    "
+              worker_lines.insert(else_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\\n")
+          catch_idx = next((i for i, line in enumerate(worker_lines)
+                            if line.strip() == "} catch (_: Exception) {"), None)
+          if catch_idx is None:
+              raise SystemExit("No se encontró catch del Worker.")
+          if not any("releaseAuthorizationAt = 0L" in line for line in worker_lines[catch_idx + 1:catch_idx + 4]):
+              indent = worker_lines[catch_idx][:len(worker_lines[catch_idx]) - len(worker_lines[catch_idx].lstrip())] + "    "
+              worker_lines.insert(catch_idx + 1, indent + "prefs.releaseAuthorizationAt = 0L\\n")
+          worker = "".join(worker_lines)
+
+                    lines = main.splitlines(keepends=True)
           status_index = next((i for i, line in enumerate(lines)
                                if "prefs.lastDeviceStatus = device" in line), None)
           if status_index is None:
@@ -1033,6 +1058,19 @@ jobs:
                                     prefs.releaseAuthorizationAt = 0L
                                     prefs.pendingRelease = false
                                     // Network/authentication failures''', 1)
+
+          # Invalidar también la marca temporal cuando falla la sincronización manual.
+          sync_start = main.find("val state = buildApi(server).sync(")
+          if sync_start < 0:
+              raise SystemExit("No se encontró el inicio de sincronización manual.")
+          sync_catch = main.find("} catch (e: Exception) {", sync_start)
+          if sync_catch < 0:
+              raise SystemExit("No se encontró catch de sincronización manual.")
+          catch_end = main.find("\\n", sync_catch)
+          if "prefs.releaseAuthorizationAt = 0L" not in main[catch_end:catch_end + 180]:
+              insert_at = catch_end + 1
+              indent = main[main.rfind("\\n", 0, sync_catch) + 1:sync_catch]
+              main = main[:insert_at] + indent + "    prefs.releaseAuthorizationAt = 0L\\n" + main[insert_at:]
 
           # Replace the method by locating its signature and matching braces; whitespace is irrelevant.
           method_signature = "private fun enterLockTaskIfAuthorized()"
