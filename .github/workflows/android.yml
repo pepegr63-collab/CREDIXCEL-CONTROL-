@@ -653,12 +653,17 @@ jobs:
           if replaced != 1:
               raise SystemExit("No se encontró la estructura real de onResume; se cancela sin tocar el código.")
 
+          # Clear the durable marker in the successful release branch, independent of indentation.
           if "prefs.pendingRelease = false" not in main:
-              main = main.replace(
-                  "                  prefs.protectionActive = false\n                  finish()",
-                  "                  prefs.protectionActive = false\n                  prefs.pendingRelease = false\n                  finish()",
-                  1
+              import re
+              main, cleared = re.subn(
+                  r"(\\n[ \\t]*)prefs\\.protectionActive = false(\\s*\\n[ \\t]*finish\\(\\))",
+                  lambda m: m.group(1) + "prefs.protectionActive = false" + m.group(1) + "prefs.pendingRelease = false" + m.group(2),
+                  main,
+                  count=1
               )
+              if cleared != 1:
+                  raise SystemExit("No se encontró el bloque final de releaseKiosk para limpiar pendingRelease.")
           if "prefs.pendingRelease = false" not in main:
               raise SystemExit("No se pudo limpiar el marcador tras liberar correctamente.")
 
