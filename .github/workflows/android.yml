@@ -819,8 +819,8 @@ jobs:
           if "prefs.lockCommandReady = true" not in worker:
               import re
               worker, branch_count = re.subn(
-                  r'(device == "LOCKED"\\s*->\\s*\\{\\s*)',
-                  r'\\1prefs.lockCommandReady = false\\n                              ',
+                  r'(device == "LOCKED"\s*->\s*\{\s*)',
+                  r'\1prefs.lockCommandReady = false\n                              ',
                   worker, count=1
               )
               if branch_count != 1:
@@ -828,7 +828,7 @@ jobs:
               guard = "if (!policies || !kiosk) return Result.retry()"
               if guard not in worker:
                   raise SystemExit("No se encontró verificación de políticas/kiosco en Worker.")
-              worker = worker.replace(guard, guard + "\\n                              prefs.lockCommandReady = true", 1)
+              worker = worker.replace(guard, guard + "\n                              prefs.lockCommandReady = true", 1)
 
           # Bump the APK version exactly once.
           if 'versionName = "1.1.6"' not in build or "versionCode = 17" not in build:
