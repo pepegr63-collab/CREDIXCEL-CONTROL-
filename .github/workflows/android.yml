@@ -26,15 +26,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Configurar SDK Android
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar plataforma y build-tools
+      - name: Instalar plataforma y build-tools Android
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          SDKMANAGER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}" -type f -name sdkmanager -print -quit)"
+          test -n "$SDKMANAGER" || { echo "No se encontró sdkmanager en el runner."; env | grep -E 'ANDROID|JAVA_HOME' || true; exit 1; }
+          echo "SDK manager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Preparar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
