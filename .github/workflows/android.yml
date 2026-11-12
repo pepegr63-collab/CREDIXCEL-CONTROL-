@@ -155,10 +155,101 @@ jobs:
           print("OK: HOME explícito y versión 1.1.0.")
           PY
 
+
+      - name: Corregir liberación segura y HOME Motorola para 1.1.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          MANIFEST="$PROJECT_DIR/android/app/src/main/AndroidManifest.xml"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$MANIFEST" "$BUILD" <<'PY'
+          import pathlib, sys
+          main_path, manifest_path, build_path = map(pathlib.Path, sys.argv[1:])
+          s = main_path.read_text()
+          old = """        if (lockTaskStopped && kioskCleared && policiesReleased) prefs.protectionActive = false
+
+                  // Launch the actual system launcher explicitly; CREDIXCEL also declares a HOME filter.
+                  val homeOpened = openSystemHome()
+          """
+          new = """        // Do not mark the device released until Android accepted the external HOME launch too.
+                  val homeOpened = if (prefs.protectionActive || !lockTaskStopped || !kioskCleared) {
+                      openSystemHome()
+                  } else {
+                      true
+                  }
+                  if (lockTaskStopped && kioskCleared && policiesReleased && homeOpened) {
+                      prefs.protectionActive = false
+                  }
+          """
+          if old not in s:
+              raise SystemExit("No se encontró el bloque de confirmación de liberación esperado.")
+          s = s.replace(old, new, 1)
+          old_home = """              val launcher = candidates
+                  .filter { it.activityInfo.packageName != this.packageName }
+                  .sortedByDescending { it.isDefault }
+                  .firstOrNull()
+                  ?.activityInfo ?: return false
+          """
+          new_home = """              // PackageManager already orders matching HOME handlers by resolution priority.
+                      // Keep the first external launcher; ResolveInfo.isDefault is not the selected HOME app.
+                      val launcher = candidates
+                          .firstOrNull { it.activityInfo.packageName != this.packageName }
+                          ?.activityInfo ?: return false
+          """
+          if old_home not in s:
+              raise SystemExit("No se encontró el selector HOME esperado.")
+          s = s.replace(old_home, new_home, 1)
+          old_active = 'device == "ACTIVE" && contract == "ACTIVE" -> releaseKiosk()'
+          new_active = '''device == "ACTIVE" && contract == "ACTIVE" -> {
+                                              val manager = getSystemService(ActivityManager::class.java)
+                                              val kioskStillPresent = prefs.protectionActive ||
+                                                  manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE ||
+                                                  DeviceActions.isLockTaskPermitted(this@MainActivity)
+                                              if (kioskStillPresent) releaseKiosk()
+                                              else "Servidor y contrato ACTIVE. El equipo ya estaba liberado; no se modificó el HOME."
+                                          }'''
+          if old_active not in s:
+              raise SystemExit("No se encontró la rama ACTIVE + ACTIVE esperada.")
+          s = s.replace(old_active, new_active, 1)
+          main_path.write_text(s)
+
+          m = manifest_path.read_text()
+          if "<queries>" not in m:
+              marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+              if marker not in m:
+                  raise SystemExit("No se encontró la raíz del AndroidManifest.")
+              m = m.replace(marker, marker + """
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.HOME" />
+                      <category android:name="android.intent.category.DEFAULT" />
+                  </intent>
+              </queries>""", 1)
+          manifest_path.write_text(m)
+
+          b = build_path.read_text()
+          if 'versionCode = 11' not in b or 'versionName = "1.1.0"' not in b:
+              raise SystemExit("La fuente no está en la versión 1.1.0 esperada antes del endurecimiento.")
+          b = b.replace("versionCode = 11", "versionCode = 12", 1)
+          b = b.replace('versionName = "1.1.0"', 'versionName = "1.1.1"', 1)
+          build_path.write_text(b)
+
+          # Post-patch checks: validate the resulting source, not just the ZIP input.
+          final = main_path.read_text()
+          assert 'device == "ACTIVE" && contract == "ACTIVE" -> {' in final
+          assert 'DeviceActions.isLockTaskPermitted(this@MainActivity)' in final
+          assert 'policiesReleased && homeOpened' in final
+          assert 'firstOrNull { it.activityInfo.packageName != this.packageName }' in final
+          assert '<queries>' in manifest_path.read_text()
+          print("OK: liberación solo con HOME externo confirmado, sin redirección al sincronizar un equipo ya ACTIVE, visibilidad HOME declarada y versión 1.1.1.")
+          PY
+
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.1.0
+          name: CREDIXCEL-Control-Fuente-1.1.1
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -198,12 +289,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.0.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.1.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.1.0-Release
-          path: CREDIXCEL-Control-1.1.0.apk
+          name: CREDIXCEL-Control-1.1.1-Release
+          path: CREDIXCEL-Control-1.1.1.apk
           if-no-files-found: error
           retention-days: 30
