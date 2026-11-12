@@ -248,7 +248,7 @@ jobs:
           print("OK: liberación solo con HOME externo confirmado, sin redirección al sincronizar un equipo ya ACTIVE, visibilidad HOME declarada y versión 1.1.1.")
           PY
 
-      - name: Corregir salida al HOME aun con restricción local INACTIVA y versionar 1.1.2
+      - name: Corregir salida al HOME aun con restricción local INACTIVA y versionar 1.1.3
         shell: bash
         run: |
           set -euo pipefail
@@ -266,10 +266,11 @@ jobs:
                   if (lockTaskStopped && kioskCleared && policiesReleased && homeOpened) {
                       prefs.protectionActive = false
                   }"""
-          new = """        // ACTIVE + ACTIVE must always return to the external Motorola HOME,
-                  // even when the local flag is already INACTIVE but kiosk policy remains.
-                  val homeOpened = openSystemHome()
-                  if (lockTaskStopped && kioskCleared && policiesReleased && homeOpened) {
+          new = """        // Only launch the external HOME after every kiosk and policy cleanup succeeds.
+                  // If any cleanup step fails, keep CREDIXCEL visible and preserve the local restriction state.
+                  val cleanupConfirmed = lockTaskStopped && kioskCleared && policiesReleased
+                  val homeOpened = cleanupConfirmed && openSystemHome()
+                  if (cleanupConfirmed && homeOpened) {
                       prefs.protectionActive = false
                       finish()
                   }"""
@@ -282,16 +283,16 @@ jobs:
           b = build_path.read_text()
           if "versionCode = 12" not in b or 'versionName = "1.1.1"' not in b:
               raise SystemExit("La fuente no coincide con 1.1.1 antes del versionado.")
-          b = b.replace("versionCode = 12", "versionCode = 13", 1)
-          b = b.replace('versionName = "1.1.1"', 'versionName = "1.1.2"', 1)
+          b = b.replace("versionCode = 12", "versionCode = 14", 1)
+          b = b.replace('versionName = "1.1.1"', 'versionName = "1.1.3"', 1)
           build_path.write_text(b)
-          print("OK: ACTIVE + ACTIVE siempre solicita HOME externo y cierra CREDIXCEL tras confirmar la liberación; versión 1.1.2.")
+          print("OK: HOME externo solo se abre tras confirmar toda la limpieza; versión 1.1.3.")
           PY
 
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.1.2
+          name: CREDIXCEL-Control-Fuente-1.1.3
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -331,12 +332,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.2.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.1.3.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.1.2-Release
-          path: CREDIXCEL-Control-1.1.2.apk
+          name: CREDIXCEL-Control-1.1.3-Release
+          path: CREDIXCEL-Control-1.1.3.apk
           if-no-files-found: error
           retention-days: 30
