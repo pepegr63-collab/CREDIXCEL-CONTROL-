@@ -965,16 +965,25 @@ jobs:
             prefs.releaseAuthorizationAt = 0L
             prefs.pendingRelease = false''', 1)
 
-          manual_anchor = '''                                    prefs.lastDeviceStatus = device
-                                    prefs.lastContractStatus = contract
-                                    serverMessage = state.message.orEmpty()'''
-          manual_replacement = '''                                    prefs.lastDeviceStatus = device
-                                    prefs.lastContractStatus = contract
-                                    prefs.releaseAuthorizationAt =
-                                        if (device == "ACTIVE" && contract == "ACTIVE") System.currentTimeMillis() else 0L
-                                    serverMessage = state.message.orEmpty()'''
-          if manual_anchor not in main: raise SystemExit("No se encontró sync manual.")
-          main = main.replace(manual_anchor, manual_replacement, 1)
+          import re
+          manual_pattern = re.compile(
+              r'(?m)^([ \\t]*)prefs\\.lastDeviceStatus = device[^\\n]*\\n'
+              r'[ \\t]*prefs\\.lastContractStatus = contract[^\\n]*\\n'
+              r'([ \\t]*)serverMessage = [^\\n]*'
+          )
+          manual_match = manual_pattern.search(main)
+          if not manual_match:
+              raise SystemExit("No se encontró el bloque de estados de sync manual (device/contract).")
+          manual_block = manual_match.group(0)
+          indent = manual_match.group(2)
+          manual_replacement = manual_block.replace(
+              "serverMessage = ",
+              'prefs.releaseAuthorizationAt =\\n' + indent +
+              '    if (device == "ACTIVE" && contract == "ACTIVE") System.currentTimeMillis() else 0L\\n' +
+              indent + "serverMessage = ",
+              1
+          )
+          main = main[:manual_match.start()] + manual_replacement + main[manual_match.end():]
 
           old_guard = '''        if (prefs.lastDeviceStatus?.trim()?.uppercase() != "ACTIVE" ||
                     prefs.lastContractStatus?.trim()?.uppercase() != "ACTIVE") {
