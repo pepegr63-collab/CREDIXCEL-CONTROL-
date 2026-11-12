@@ -636,23 +636,22 @@ jobs:
               main = main.replace(anchor, method + anchor, 1)
 
           # A pending ACTIVE+ACTIVE command is completed only while this Activity is foreground.
-          old_resume = '''        if (!::prefs.isInitialized || !prefs.protectionActive) return
-
-              if (DeviceActions.configureKiosk(this) && DeviceActions.isLockTaskPermitted(this)) {'''
+          import re
+          pattern = r'        if \(!::prefs\.isInitialized \|\| !prefs\.protectionActive\) return\s+if \(DeviceActions\.configureKiosk\(this\) && DeviceActions\.isLockTaskPermitted\(this\)\) \{'
           new_resume = '''        if (!::prefs.isInitialized) return
-              if (prefs.pendingRelease) {
-                  val result = releaseKiosk()
                   if (prefs.pendingRelease) {
-                      Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+                      val result = releaseKiosk()
+                      if (prefs.pendingRelease) {
+                          Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+                      }
+                      return
                   }
-                  return
-              }
-              if (!prefs.protectionActive) return
+                  if (!prefs.protectionActive) return
 
-              if (DeviceActions.configureKiosk(this) && DeviceActions.isLockTaskPermitted(this)) {'''
-          if old_resume not in main:
-              raise SystemExit("No se encontró el onResume esperado para priorizar la liberación pendiente.")
-          main = main.replace(old_resume, new_resume, 1)
+                  if (DeviceActions.configureKiosk(this) && DeviceActions.isLockTaskPermitted(this)) {'''
+          main, replaced = re.subn(pattern, lambda _: new_resume, main, count=1)
+          if replaced != 1:
+              raise SystemExit("No se encontró la estructura real de onResume; se cancela sin tocar el código.")
 
           if "prefs.pendingRelease = false" not in main:
               main = main.replace(
@@ -770,6 +769,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CREDIXCEL-Control-1.1.6-Release
-          path: CREDIXCEL-Control-1.1.5.apk
+          path: CREDIXCEL-Control-1.1.6.apk
           if-no-files-found: error
           retention-days: 30
