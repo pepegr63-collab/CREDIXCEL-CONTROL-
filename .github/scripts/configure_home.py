@@ -28,8 +28,7 @@ if 'android.intent.category.HOME' not in body:
 manifest.write_text(m)
 
 d = device.read_text()
-if 'fun updateManagedLockAllowlist(' not in d:
-    helper = '''
+helper = '''
     /** Configura Lock Task y HOME persistente desde Activity o Worker. */
     fun updateManagedLockAllowlist(context: Context, locked: Boolean): Boolean {
         if (!isDeviceOwner(context)) return false
@@ -59,12 +58,15 @@ if 'fun updateManagedLockAllowlist(' not in d:
             true
         } catch (_: Exception) { false }
     }
-
 '''
+helper_pat = r'(?ms)^    fun updateManagedLockAllowlist\(context: Context, locked: Boolean\): Boolean \{.*?^    \}'
+if re.search(helper_pat, d):
+    d = re.sub(helper_pat, helper.strip('\n'), d, count=1)
+else:
     needle = '    fun lock(context: Context): Boolean {'
     if needle not in d:
         raise SystemExit("No se encontró el punto de inserción en DeviceActions.kt")
-    d = d.replace(needle, helper + needle, 1)
+    d = d.replace(needle, helper + '\n' + needle, 1)
 
 old_enter = '        manager.setLockTaskPackages(admin(activity), arrayOf(activity.packageName))'
 if old_enter in d:
