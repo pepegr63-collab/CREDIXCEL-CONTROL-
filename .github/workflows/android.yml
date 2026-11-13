@@ -1498,8 +1498,8 @@ jobs:
             val launcher = context.packageManager.queryIntentActivities(
                 homeIntent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
             ).asSequence()
-                .map { it.activityInfo }
-                .filter { info ->
+                .filter { item ->
+                    val info = item.activityInfo
                     info.packageName != context.packageName &&
                         runCatching {
                             val app = context.packageManager.getApplicationInfo(info.packageName, 0)
@@ -1507,9 +1507,12 @@ jobs:
                         }.getOrDefault(false)
                 }
                 .sortedWith(
-                    compareByDescending<android.content.pm.ActivityInfo> { it.priority }
-                        .thenBy { it.packageName }
+                    compareByDescending<android.content.pm.ResolveInfo> { it.priority }
+                        .thenByDescending { it.isDefault }
+                        .thenByDescending { it.preferredOrder }
+                        .thenBy { it.activityInfo.packageName }
                 )
+                .map { it.activityInfo }
                 .firstOrNull() ?: return false
 
             val filter = IntentFilter(Intent.ACTION_MAIN).apply {
