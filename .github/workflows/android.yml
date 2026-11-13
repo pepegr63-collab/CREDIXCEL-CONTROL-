@@ -1543,7 +1543,7 @@ jobs:
                   false
               }
           }
-"""
+          """
           source = source[:start] + replacement + source[end:]
           required = [
               "manager.clearPackagePersistentPreferredActivities(admin(context), context.packageName)",
