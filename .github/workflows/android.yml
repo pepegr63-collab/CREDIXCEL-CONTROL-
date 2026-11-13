@@ -1296,6 +1296,149 @@ jobs:
           print("OK: selección del HOME real del sistema y versión 1.2.0.")
           PY
 
+      - name: Corregir liberación asíncrona de Lock Task y versionar 1.2.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$BUILD" <<'PY'
+          import pathlib, sys
+          main_path, build_path = map(pathlib.Path, sys.argv[1:])
+          source = main_path.read_text()
+          build = build_path.read_text()
+
+          class_anchor = "class MainActivity : ComponentActivity() {"
+          if class_anchor not in source:
+              raise SystemExit("No se encontró MainActivity.")
+          if "private var releaseInProgress = false" not in source:
+              source = source.replace(
+                  class_anchor,
+                  class_anchor + "\n    @Volatile private var releaseInProgress = false",
+                  1
+              )
+
+          start_token = "private fun releaseKiosk(): String {"
+          start = source.find(start_token)
+          end = source.find("\n\n    @Composable", start)
+          if start < 0 or end < 0:
+              raise SystemExit("No se encontró el límite exacto de releaseKiosk.")
+          replacement = r"""private fun releaseKiosk(): String {
+                  if (releaseInProgress) return "La liberación ya está en curso; espera la confirmación de Android."
+                  val authorizationAge = System.currentTimeMillis() - prefs.releaseAuthorizationAt
+                  if (prefs.lastDeviceStatus?.trim()?.uppercase() != "ACTIVE" ||
+                      prefs.lastContractStatus?.trim()?.uppercase() != "ACTIVE" ||
+                      prefs.releaseAuthorizationAt <= 0L ||
+                      authorizationAge < 0L || authorizationAge > 5 * 60 * 1000L) {
+                      prefs.pendingRelease = false
+                      prefs.releaseAuthorizationAt = 0L
+                      return "Liberación cancelada: se requiere confirmación ACTIVE + ACTIVE reciente. Se conserva la protección."
+                  }
+                  if (!DeviceActions.isDeviceOwner(this)) {
+                      return "CREDIXCEL ya no es Device Owner. Se conserva el estado local."
+                  }
+
+                  releaseInProgress = true
+                  val policiesReleased = DeviceActions.releaseFinancingProtection(this)
+                  if (!policiesReleased) {
+                      releaseInProgress = false
+                      val rollback = restoreKioskAfterFailedRelease()
+                      prefs.pendingRelease = false
+                      prefs.releaseAuthorizationAt = 0L
+                      android.widget.Toast.makeText(
+                          this, "No se pudieron retirar todas las políticas. Protección restaurada: $rollback",
+                          android.widget.Toast.LENGTH_LONG
+                      ).show()
+                      return "No se pudieron retirar todas las políticas; se restauró la protección."
+                  }
+
+                  val manager = getSystemService(ActivityManager::class.java)
+                  val stopRequested = runCatching {
+                      if (manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE) stopLockTask()
+                      true
+                  }.getOrDefault(false)
+
+                  fun failRelease(reason: String) {
+                      releaseInProgress = false
+                      val rollback = runCatching { restoreKioskAfterFailedRelease() }.getOrDefault(false)
+                      prefs.protectionActive = true
+                      prefs.pendingRelease = false
+                      prefs.releaseAuthorizationAt = 0L
+                      android.widget.Toast.makeText(
+                          this, "$reason. Protección restaurada: $rollback",
+                          android.widget.Toast.LENGTH_LONG
+                      ).show()
+                  }
+
+                  if (!stopRequested) {
+                      failRelease("Android rechazó la solicitud de salida de Lock Task")
+                      return "Android rechazó la solicitud de salida; se conserva la protección."
+                  }
+
+                  // stopLockTask() is a Binder request. Android may update ActivityManager
+                  // after this call returns, so never read lockTaskModeState as an immediate
+                  // success/failure signal and never roll the device back on that stale value.
+                  val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                  val startedAt = android.os.SystemClock.elapsedRealtime()
+                  lateinit var verifyExit: Runnable
+                  verifyExit = Runnable {
+                      if (isFinishing || isDestroyed) {
+                          failRelease("La actividad terminó antes de confirmar la liberación")
+                      } else if (manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE) {
+                          if (android.os.SystemClock.elapsedRealtime() - startedAt < 5000L) {
+                              handler.postDelayed(verifyExit, 150L)
+                          } else {
+                              failRelease("Android no confirmó la salida de Lock Task después de 5 segundos")
+                          }
+                      } else {
+                          val kioskCleared = DeviceActions.clearKioskConfiguration(this)
+                          if (!kioskCleared) {
+                              failRelease("No se pudo limpiar la configuración de kiosco")
+                          } else {
+                              val homeOpened = openSystemHome()
+                              if (!homeOpened) {
+                                  failRelease("No se pudo abrir el launcher original del Motorola")
+                              } else {
+                                  // Report ACTIVE locally only after Android has left Lock Task,
+                                  // kiosk policies are cleared, and the external HOME was launched.
+                                  prefs.protectionActive = false
+                                  prefs.lockCommandReady = false
+                                  prefs.pendingRelease = false
+                                  prefs.releaseAuthorizationAt = 0L
+                                  releaseInProgress = false
+                                  finish()
+                              }
+                          }
+                      }
+                  }
+                  handler.postDelayed(verifyExit, 150L)
+                  return "Orden ACTIVE + ACTIVE aceptada. Esperando confirmación real de Android para salir del modo kiosco."
+              }"""
+          source = source[:start] + replacement + source[end:]
+
+          if 'versionName = "1.2.0"' not in build or "versionCode = 21" not in build:
+              raise SystemExit("La fuente no coincide con 1.2.0 / código 21.")
+          build = build.replace("versionCode = 21", "versionCode = 22", 1)
+          build = build.replace('versionName = "1.2.0"', 'versionName = "1.2.1"', 1)
+
+          checks = {
+              "espera asincrónica por estado NONE": "handler.postDelayed(verifyExit, 150L)" in source and "LOCK_TASK_MODE_NONE" in source,
+              "no interpreta como fallo el estado Binder inmediato": "never read lockTaskModeState as an immediate" in source,
+              "tiempo máximo de confirmación": " < 5000L" in source,
+              "no limpia kiosco antes de salir de Lock Task": source.index("manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE") < source.index("DeviceActions.clearKioskConfiguration(this)", source.index(start_token)),
+              "ACTIVE local solo después de HOME externo": source.index("val homeOpened = openSystemHome()") < source.index("prefs.protectionActive = false", source.index(start_token)),
+              "evita liberaciones duplicadas": "releaseInProgress" in source,
+              "versión 1.2.1 / código 22": 'versionName = "1.2.1"' in build and "versionCode = 22" in build,
+          }
+          for label, ok in checks.items():
+              print(("OK: " if ok else "ERROR: ") + label)
+          if not all(checks.values()):
+              raise SystemExit("Falló la validación de liberación asíncrona.")
+          main_path.write_text(source)
+          build_path.write_text(build)
+          print("OK: liberación asíncrona confirmada por Android; versión 1.2.1.")
+          PY
+
       - name: Validar sincronización automática antes de publicar
         shell: bash
         run: |
@@ -1319,7 +1462,7 @@ jobs:
               "fallos de red invalidan liberación pendiente y reintentan": "Result.retry()" in worker and "prefs.pendingRelease = false" in worker,
               "estado incierto invalida liberación pendiente": "else -> {" in worker and "prefs.pendingRelease = false" in worker,
               "liberación valida los dos estados guardados": "Liberación cancelada: se requiere confirmación ACTIVE + ACTIVE reciente" in main,
-              "versión 1.2.0 / código 21": 'versionName = "1.2.0"' in build and "versionCode = 21" in build,
+              "versión 1.2.1 / código 22": 'versionName = "1.2.1"' in build and "versionCode = 22" in build,
           }
           for label, ok in checks.items():
               print(("OK: " if ok else "ERROR: ") + label)
@@ -1330,7 +1473,7 @@ jobs:
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.2.0
+          name: CREDIXCEL-Control-Fuente-1.2.1
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -1370,12 +1513,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.2.0.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.2.1.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.2.0-Release
-          path: CREDIXCEL-Control-1.2.0.apk
+          name: CREDIXCEL-Control-1.2.1-Release
+          path: CREDIXCEL-Control-1.2.1.apk
           if-no-files-found: error
           retention-days: 30
