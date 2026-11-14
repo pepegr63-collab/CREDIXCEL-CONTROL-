@@ -122,12 +122,31 @@ new_enter = '''private fun enterLockTaskIfAuthorized(): Boolean {
         if (manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) startLockTask()
         manager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_LOCKED
     }.getOrDefault(false)
-    if (entered) FcmCommandAcknowledger.acknowledge(this, prefs, true, "Lock Task confirmado por Android")
+    if (entered) {
+        FcmCommandAcknowledger.acknowledge(this, prefs, true, "Lock Task confirmado por Android")
+    } else if (prefs.pendingRemoteCommandId != null) {
+        FcmCommandAcknowledger.acknowledge(this, prefs, false, "Android no confirmó el modo Lock Task")
+    }
     return entered
 }'''
 if old_enter not in main_text:
     raise SystemExit("No se encontró enterLockTaskIfAuthorized en MainActivity.kt.")
 main_text = main_text.replace(old_enter, new_enter, 1)
+
+main_text = main_text.replace(
+    '''        if (!prefs.protectionActive) return
+
+        if (!enterLockTaskIfAuthorized()) {''',
+    '''        if (!prefs.protectionActive) {
+            if (!prefs.pendingRelease && prefs.pendingRemoteCommandId != null) {
+                FcmCommandAcknowledger.acknowledge(this, prefs, true, "Liberación confirmada previamente por Android")
+            }
+            return
+        }
+
+        if (!enterLockTaskIfAuthorized()) {''',
+    1
+)
 
 main_text = main_text.replace(
     '''            prefs.pendingRelease = false
@@ -294,9 +313,8 @@ object FcmCommandProcessor {
                         return
                     }
                     prefs.lockCommandReady = true
-                    if (!DeviceActions.lock(context)) {
-                        FcmCommandAcknowledger.acknowledge(context, prefs, false, "Android no confirmó lockNow")
-                    }
+                    // Best-effort screen lock; the foreground Activity's Lock Task confirmation is authoritative.
+                    DeviceActions.lock(context)
                     // MainActivity acknowledges only after Android confirms Lock Task.
                 }
                 "UNLOCK_DEVICE" -> {
