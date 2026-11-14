@@ -272,6 +272,7 @@ app.get('/api/admin/devices', admin, async (req, res, next) => {
   try {
     const r = await pool.query(`
       SELECT d.*, (d.fcm_token IS NOT NULL AND d.fcm_token <> '') AS fcm_registered,
+      (SELECT cmd.status FROM device_commands cmd WHERE cmd.device_id=d.id ORDER BY cmd.created_at DESC LIMIT 1) AS last_command_status,
       c.name AS client_name, c.id AS client_id,
       ct.id AS contract_id, ct.status AS contract_status
       FROM devices d LEFT JOIN contracts ct ON ct.device_id=d.id
