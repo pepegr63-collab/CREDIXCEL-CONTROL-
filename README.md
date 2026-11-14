@@ -40,3 +40,23 @@ The resulting APK will be under:
 - FactoryResetProtectionPolicy: https://developer.android.com/reference/android/app/admin/FactoryResetProtectionPolicy
 - Android Enterprise security / FRP: https://developer.android.com/work/dpc/security
 - Dedicated-device restrictions: https://developer.android.com/work/dpc/dedicated-devices/cookbook
+
+
+## Órdenes remotas de bloqueo y liberación (1.2.4)
+
+La rama de trabajo `feature/automatic-device-state` incorpora órdenes remotas por Firebase Cloud Messaging (FCM). El botón **Guardar estado** guarda el estado y, cuando corresponde, envía una orden al dispositivo:
+
+- `LOCKED` → orden `LOCK_DEVICE`.
+- `ACTIVE` → orden `UNLOCK_DEVICE` únicamente cuando el contrato también está `ACTIVE`.
+- `PAYMENT_DUE` → guarda el estado, pero no libera ni envía una orden de desbloqueo.
+
+### Configuración necesaria
+
+1. En GitHub Actions, configurar el secreto `GOOGLE_SERVICES_JSON` con el archivo de configuración Android del proyecto Firebase `credixcel-control`, paquete `com.credixcel.control`.
+2. En Render, configurar `FIREBASE_SERVICE_ACCOUNT_JSON` con el JSON de una cuenta de servicio del mismo proyecto Firebase que tenga permiso para enviar Firebase Cloud Messaging.
+3. Desplegar el servidor de esta rama después de revisar y aprobar los cambios.
+4. Instalar la nueva APK 1.2.4 y enrolar el dispositivo para registrar su token FCM.
+
+El servidor guarda un registro auditable de cada orden y solo la marca como ejecutada cuando Android confirma la entrada en Lock Task o la salida real del modo kiosco. Las órdenes tienen una vigencia corta; los estados más recientes reemplazan las órdenes antiguas. La sincronización periódica existente se conserva como respaldo, no como mecanismo principal de entrega inmediata.
+
+La versión 1.2.3 no se modifica ni se reemplaza por esta rama.

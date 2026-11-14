@@ -126,7 +126,7 @@ async function loadDevices() {
       const title = document.createElement('h3');
       title.textContent = d.device_name || 'Equipo sin enrolar';
       const info = document.createElement('p');
-      info.textContent = `Estado: ${d.status} · Cliente: ${d.client_name || 'Sin asignar'} · Código: ${d.enrollment_code}`;
+      info.textContent = `Estado: ${d.status} · FCM: ${d.fcm_registered ? 'registrada' : 'sin registrar'} · Orden: ${d.last_command_status || 'ninguna'} · Cliente: ${d.client_name || 'Sin asignar'} · Código: ${d.enrollment_code}`;
       const select = document.createElement('select');
       [['ACTIVE','Activo'],['PAYMENT_DUE','Pago pendiente'],['LOCKED','Bloqueado']].forEach(([v,l])=>{
         const o = document.createElement('option'); o.value=v; o.textContent=l; o.selected=d.status===v; select.append(o);
@@ -138,10 +138,17 @@ async function loadDevices() {
       save.textContent = 'Guardar estado';
       save.onclick = async () => {
         try {
-          await api('/api/admin/devices/'+encodeURIComponent(d.id)+'/state',{
+          const result = await api('/api/admin/devices/'+encodeURIComponent(d.id)+'/state',{
             method:'POST',body:JSON.stringify({status:select.value,message:message.value})
           });
-          alert('Estado actualizado.');
+          const messages = {
+            sent: 'Estado guardado y orden enviada al dispositivo. Esperando confirmación.',
+            not_configured: 'Estado guardado, pero falta configurar Firebase Cloud Messaging en el servidor.',
+            device_not_registered: 'Estado guardado, pero el dispositivo necesita la nueva APK para registrar FCM.',
+            failed: 'Estado guardado, pero no se pudo entregar la orden al dispositivo.',
+            not_required: result.message || 'Estado guardado.'
+          };
+          alert(messages[result.delivery] || result.message || 'Estado actualizado.');
           await loadDevices();
         } catch(e) { alert(e.message); }
       };
