@@ -159,9 +159,16 @@ app.post('/api/device/commands/claim', async (req, res, next) => {
     );
     if (!device.rowCount) return res.status(401).json({ error: 'Dispositivo no autorizado.' });
     const result = await pool.query(
-      `UPDATE device_commands SET status='PROCESSING'
-       WHERE id=$1 AND device_id=$2 AND status='SENT'
-       RETURNING id, action`,
+      `UPDATE device_commands cmd SET status='PROCESSING'
+       FROM devices d
+       LEFT JOIN contracts c ON c.device_id=d.id
+       WHERE cmd.id=$1 AND cmd.device_id=$2 AND cmd.status='SENT'
+         AND d.id=cmd.device_id
+         AND (
+           (cmd.action='LOCK_DEVICE' AND d.status='LOCKED')
+           OR (cmd.action='UNLOCK_DEVICE' AND d.status='ACTIVE' AND c.status='ACTIVE')
+         )
+       RETURNING cmd.id, cmd.action`,
       [commandId, deviceId]
     );
     if (!result.rowCount) return res.status(404).json({ error: 'Orden no disponible.' });
@@ -186,6 +193,12 @@ app.post('/api/device/commands/ack', async (req, res, next) => {
 
     const ok = success === true;
     const action = command.rows[0].action;
+    if (ok && action === 'LOCK_DEVICE') {
+      const current = await pool.query('SELECT status FROM devices WHERE id=$1', [deviceId]);
+      if (!current.rows[0] || current.rows[0].status !== 'LOCKED') {
+        return res.status(409).json({ error: 'La orden de bloqueo quedó reemplazada por un estado más reciente.' });
+      }
+    }
     if (ok && action === 'UNLOCK_DEVICE') {
       const authorization = await pool.query(
         `SELECT d.status, c.status AS contract_status
