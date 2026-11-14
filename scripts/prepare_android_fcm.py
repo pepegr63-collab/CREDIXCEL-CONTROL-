@@ -50,6 +50,15 @@ if 'firebase-bom' not in app_text:
     implementation("com.google.firebase:firebase-messaging")
 }
 '''
+if 'androidx.fragment:fragment-ktx' not in app_text:
+    marker = '    implementation("androidx.activity:activity-compose:1.10.1")\n'
+    if marker not in app_text:
+        raise SystemExit("No se encontró la dependencia Activity Compose para corregir el requisito de Fragment.")
+    app_text = app_text.replace(
+        marker,
+        marker + '    implementation("androidx.fragment:fragment-ktx:1.8.6")\n',
+        1
+    )
 app_text = app_text.replace("versionCode = 24", "versionCode = 25")
 app_text = app_text.replace('versionName = "1.2.3"', 'versionName = "1.2.4"')
 app_gradle.write_text(app_text, encoding="utf-8")
@@ -406,6 +415,7 @@ object FcmCommandAcknowledger {
 checks = {
     "versión 1.2.4": 'versionName = "1.2.4"' in app_gradle.read_text(encoding="utf-8") and "versionCode = 25" in app_gradle.read_text(encoding="utf-8"),
     "servicio Firebase declarado": "CredixcelMessagingService" in manifest.read_text(encoding="utf-8"),
+    "Fragment compatible con Activity Result API": 'androidx.fragment:fragment-ktx:1.8.6' in app_gradle.read_text(encoding="utf-8"),
     "registro FCM tras enrolamiento": "FcmTokenRegistrar.register(this@MainActivity, prefs)" in main_activity.read_text(encoding="utf-8"),
     "bloqueo confirmado por Lock Task": "Lock Task confirmado por Android" in main_activity.read_text(encoding="utf-8"),
     "liberación confirmada por Android": "Liberación confirmada por Android" in main_activity.read_text(encoding="utf-8"),
