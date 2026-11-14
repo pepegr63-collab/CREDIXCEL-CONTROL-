@@ -1583,16 +1583,16 @@ jobs:
           message_line = source.find("serverMessage =", auth_line)
           if message_line < 0:
               raise SystemExit("No se encontró serverMessage después de la autorización.")
-          line_end = source.find("\\n", message_line)
+          line_end = source.find("\n", message_line)
           if line_end < 0:
               raise SystemExit("La asignación serverMessage no termina en una línea.")
-          line_start = source.rfind("\\n", 0, message_line) + 1
+          line_start = source.rfind("\n", 0, message_line) + 1
           indent = source[line_start:message_line]
           insertion = (
-              indent + 'if (device == "ACTIVE" && contract == "ACTIVE" && prefs.protectionActive) {\\n' +
-              indent + '    prefs.pendingRelease = true\\n' +
-              indent + '    serverMessage = releaseKiosk()\\n' +
-              indent + '}\\n'
+              indent + 'if (device == "ACTIVE" && contract == "ACTIVE" && prefs.protectionActive) {\n' +
+              indent + '    prefs.pendingRelease = true\n' +
+              indent + '    serverMessage = releaseKiosk()\n' +
+              indent + '}\n'
           )
           if "serverMessage = releaseKiosk()" not in source:
               source = source[:line_end + 1] + insertion + source[line_end + 1:]
