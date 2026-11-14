@@ -326,8 +326,12 @@ app.post('/api/admin/devices/:id/state', admin, async (req, res, next) => {
 
     const commandId = id();
     await pool.query(
-      `INSERT INTO device_commands(id,device_id,action,status,created_at)
-       VALUES($1,$2,$3,'PENDING',$4)`,
+      "UPDATE device_commands SET status='SUPERSEDED', completed_at=$1 WHERE device_id=$2 AND status IN ('PENDING','SENT','PROCESSING')",
+      [now(), device.id]
+    );
+    await pool.query(
+      `INSERT INTO device_commands(id,device_id,action,status,created_at,sent_at)
+       VALUES($1,$2,$3,'SENT',$4,$4)`,
       [commandId, device.id, action, now()]
     );
 
@@ -341,12 +345,8 @@ app.post('/api/admin/devices/:id/state', admin, async (req, res, next) => {
           deviceStatus: status,
           contractStatus: device.contract_status || 'UNKNOWN'
         },
-        android: { priority: 'high' }
+        android: { priority: 'high', ttl: 10 * 60 * 1000 }
       });
-      await pool.query(
-        "UPDATE device_commands SET status='SENT', sent_at=$1 WHERE id=$2",
-        [now(), commandId]
-      );
       await audit('DEVICE_COMMAND_SENT', 'device', device.id, `${action}: ${commandId}`);
       return res.status(202).json({
         updated: 1,
