@@ -1564,6 +1564,62 @@ jobs:
           print("OK: ACTIVE asignará HOME persistente al launcher del sistema y verificará que HOME ya no resuelva a CREDIXCEL. Versión 1.2.2.")
           PY
 
+      - name: Ejecutar liberación al terminar sincronización manual y versionar 1.2.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="$PROJECT_DIR/android/app/src/main/java/com/credixcel/control/MainActivity.kt"
+          BUILD="$PROJECT_DIR/android/app/build.gradle.kts"
+          python3 - "$MAIN" "$BUILD" <<'PY'
+          import pathlib, sys
+          main_path, build_path = map(pathlib.Path, sys.argv[1:])
+          source = main_path.read_text()
+          sync_start = source.find("val state = buildApi(server).sync(")
+          if sync_start < 0:
+              raise SystemExit("No se encontró la sincronización manual.")
+          auth_line = source.find("if (device == \"ACTIVE\" && contract == \"ACTIVE\") System.currentTimeMillis() else 0L", sync_start)
+          if auth_line < 0:
+              raise SystemExit("No se encontró la autorización temporal ACTIVE + ACTIVE.")
+          message_line = source.find("serverMessage =", auth_line)
+          if message_line < 0:
+              raise SystemExit("No se encontró serverMessage después de la autorización.")
+          line_end = source.find("\\n", message_line)
+          if line_end < 0:
+              raise SystemExit("La asignación serverMessage no termina en una línea.")
+          line_start = source.rfind("\\n", 0, message_line) + 1
+          indent = source[line_start:message_line]
+          insertion = (
+              indent + 'if (device == "ACTIVE" && contract == "ACTIVE" && prefs.protectionActive) {\\n' +
+              indent + '    prefs.pendingRelease = true\\n' +
+              indent + '    serverMessage = releaseKiosk()\\n' +
+              indent + '}\\n'
+          )
+          if "serverMessage = releaseKiosk()" not in source:
+              source = source[:line_end + 1] + insertion + source[line_end + 1:]
+          else:
+              raise SystemExit("Ya existe una llamada directa a releaseKiosk en la sincronización manual.")
+          checks = {
+              "la llamada está dentro de la sincronización manual": source.find("serverMessage = releaseKiosk()", sync_start) > sync_start,
+              "solo libera con ACTIVE + ACTIVE": 'if (device == "ACTIVE" && contract == "ACTIVE" && prefs.protectionActive)' in source,
+              "marca liberación pendiente antes de ejecutarla": source.find("prefs.pendingRelease = true", sync_start) < source.find("serverMessage = releaseKiosk()", sync_start),
+              "la autorización temporal se calcula antes de liberar": auth_line < source.find("serverMessage = releaseKiosk()", sync_start),
+          }
+          for label, ok in checks.items():
+              print(("OK: " if ok else "ERROR: ") + label)
+          if not all(checks.values()):
+              raise SystemExit("Falló la validación de liberación desde sincronización manual.")
+          build = build_path.read_text()
+          if 'versionName = "1.2.2"' not in build or "versionCode = 23" not in build:
+              raise SystemExit("La fuente no coincide con 1.2.2 / código 23.")
+          build = build.replace("versionCode = 23", "versionCode = 24", 1)
+          build = build.replace('versionName = "1.2.2"', 'versionName = "1.2.3"', 1)
+          if 'versionName = "1.2.3"' not in build or "versionCode = 24" not in build:
+              raise SystemExit("No se pudo versionar 1.2.3.")
+          main_path.write_text(source)
+          build_path.write_text(build)
+          print("OK: ACTIVE + ACTIVE ejecuta releaseKiosk inmediatamente al terminar la sincronización manual; versión 1.2.3.")
+          PY
+
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
