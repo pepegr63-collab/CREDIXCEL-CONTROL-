@@ -185,11 +185,17 @@ app.post('/api/device/commands/ack', async (req, res, next) => {
     );
     if (!device.rowCount) return res.status(401).json({ error: 'Dispositivo no autorizado.' });
     const command = await pool.query(
-      `SELECT action FROM device_commands
-       WHERE id=$1 AND device_id=$2 AND status='PROCESSING'`,
+      `SELECT action, status FROM device_commands
+       WHERE id=$1 AND device_id=$2`,
       [commandId, deviceId]
     );
-    if (!command.rowCount) return res.status(404).json({ error: 'Orden no encontrada o ya procesada.' });
+    if (!command.rowCount) return res.status(404).json({ error: 'Orden no encontrada.' });
+    if (command.rows[0].status === 'EXECUTED' || command.rows[0].status === 'FAILED') {
+      return res.json({ acknowledged: true, status: command.rows[0].status });
+    }
+    if (command.rows[0].status !== 'PROCESSING') {
+      return res.status(409).json({ error: 'La orden fue reemplazada o ya no está en proceso.' });
+    }
 
     const ok = success === true;
     const action = command.rows[0].action;
