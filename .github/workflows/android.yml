@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/android.yml"
       - "CREDIXCEL-Control-fixed10-sin-bloqueos.zip"
+      - "scripts/prepare_android_fcm.py"
 
 jobs:
   build:
@@ -1620,10 +1621,18 @@ jobs:
           print("OK: ACTIVE + ACTIVE ejecuta releaseKiosk inmediatamente al terminar la sincronización manual; versión 1.2.3.")
           PY
 
+      - name: Integrar Firebase Cloud Messaging y versionar 1.2.4
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/prepare_android_fcm.py
+
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.2.3
+          name: CREDIXCEL-Control-Fuente-1.2.4
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -1663,12 +1672,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.2.3.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.2.4.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.2.3-Release
-          path: CREDIXCEL-Control-1.2.3.apk
+          name: CREDIXCEL-Control-1.2.4-Release
+          path: CREDIXCEL-Control-1.2.4.apk
           if-no-files-found: error
           retention-days: 30
