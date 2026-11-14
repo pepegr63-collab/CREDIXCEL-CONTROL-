@@ -163,6 +163,7 @@ app.post('/api/device/commands/claim', async (req, res, next) => {
        FROM devices d
        LEFT JOIN contracts c ON c.device_id=d.id
        WHERE cmd.id=$1 AND cmd.device_id=$2 AND cmd.status='SENT'
+         AND cmd.sent_at >= NOW() - INTERVAL '10 minutes'
          AND d.id=cmd.device_id
          AND (
            (cmd.action='LOCK_DEVICE' AND d.status='LOCKED')
@@ -272,7 +273,11 @@ app.get('/api/admin/devices', admin, async (req, res, next) => {
   try {
     const r = await pool.query(`
       SELECT d.*, (d.fcm_token IS NOT NULL AND d.fcm_token <> '') AS fcm_registered,
-      (SELECT cmd.status FROM device_commands cmd WHERE cmd.device_id=d.id ORDER BY cmd.created_at DESC LIMIT 1) AS last_command_status,
+      (SELECT CASE
+        WHEN cmd.status='SENT' AND cmd.sent_at < NOW() - INTERVAL '10 minutes' THEN 'EXPIRED'
+        ELSE cmd.status
+       END
+       FROM device_commands cmd WHERE cmd.device_id=d.id ORDER BY cmd.created_at DESC LIMIT 1) AS last_command_status,
       c.name AS client_name, c.id AS client_id,
       ct.id AS contract_id, ct.status AS contract_status
       FROM devices d LEFT JOIN contracts ct ON ct.device_id=d.id
