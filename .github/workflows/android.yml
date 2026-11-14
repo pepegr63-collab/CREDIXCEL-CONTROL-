@@ -1623,7 +1623,7 @@ jobs:
       - name: Publicar fuente exacta compilada
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-Fuente-1.2.2
+          name: CREDIXCEL-Control-Fuente-1.2.3
           path: |
             buildsrc/**/CREDIXCEL-Control/android/app/src/**
             buildsrc/**/CREDIXCEL-Control/android/app/build.gradle.kts
@@ -1663,12 +1663,12 @@ jobs:
           "$APKANALYZER" manifest version-code "$APK"
           "$APKANALYZER" manifest version-name "$APK"
           "$APKANALYZER" manifest application-id "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.2.2.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/CREDIXCEL-Control-1.2.3.apk"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-Control-1.2.2-Release
-          path: CREDIXCEL-Control-1.2.2.apk
+          name: CREDIXCEL-Control-1.2.3-Release
+          path: CREDIXCEL-Control-1.2.3.apk
           if-no-files-found: error
           retention-days: 30
