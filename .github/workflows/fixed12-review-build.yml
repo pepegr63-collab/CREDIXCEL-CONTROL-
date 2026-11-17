@@ -1,0 +1,106 @@
+name: CREDIXCEL fixed12 review build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fixed12-fcm-review
+    paths:
+      - 'CREDIXCEL-Control-fixed11-fcm-patch.zip'
+      - '.github/workflows/fixed12-review-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  fixed12-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated review branch
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Extract fixed11 FCM source archive
+        shell: bash
+        run: |
+          test -f CREDIXCEL-Control-fixed11-fcm-patch.zip
+          mkdir -p "$RUNNER_TEMP/credixcel-source"
+          unzip -q CREDIXCEL-Control-fixed11-fcm-patch.zip -d "$RUNNER_TEMP/credixcel-source"
+          PROJECT="$(find "$RUNNER_TEMP/credixcel-source" -name settings.gradle.kts -printf '%h\n' | head -n 1)"
+          test -n "$PROJECT"
+          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Apply fixed12 review corrections
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["PROJECT_DIR"])
+          gradle_file = root / "android/app/build.gradle.kts"
+          text = gradle_file.read_text()
+
+          start = text.index('    signingConfigs {')
+          end = text.index('\n\n    compileOptions', start)
+          replacement = '''    // Release signing is optional for CI Debug builds.
+              val releaseStorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+              val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+              val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+              val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+              val hasReleaseSigning = listOf(
+                  releaseStorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword
+              ).all { !it.isNullOrBlank() }
+
+              if (hasReleaseSigning) {
+                  signingConfigs {
+                      create("release") {
+                          storeFile = file(releaseStorePath!!)
+                          storePassword = releaseStorePassword!!
+                          keyAlias = releaseKeyAlias!!
+                          keyPassword = releaseKeyPassword!!
+                      }
+                  }
+              }'''
+          text = text[:start] + replacement + text[end:]
+          text = text.replace(
+              '            signingConfig = signingConfigs.getByName("release")',
+              '            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")',
+              1
+          )
+          gradle_file.write_text(text)
+
+          service = root / "android/app/src/main/java/com/credixcel/control/messaging/CredixcelMessagingService.kt"
+          kotlin = service.read_text()
+          start = kotlin.index('                val homeCleared = DeviceActions.clearKioskConfiguration(this)')
+          end = kotlin.index('\n            }\n            else -> return', start)
+          replacement = '''                // FirebaseMessagingService cannot stop or verify the Activity Lock Task session.
+                          // Keep protection active; authenticated MainActivity sync must verify release.
+                          prefs.protectionActive = true
+                          "UNLOCK_DEFERRED_ACTIVITY_SYNC_UNVERIFIED"'''
+          service.write_text(kotlin[:start] + replacement + kotlin[end:])
+          print("Correcciones fixed12 aplicadas.")
+          PY
+
+      - name: Validate backend syntax
+        run: node --check "$PROJECT_DIR/server/src/server.js"
+
+      - name: Compile Android Debug APK
+        run: gradle --no-daemon -p "$PROJECT_DIR" :android:app:assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CREDIXCEL-fixed12-review-debug
+          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
