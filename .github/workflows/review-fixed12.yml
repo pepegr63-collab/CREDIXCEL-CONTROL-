@@ -1,6 +1,12 @@
 name: Revisar fuente CREDIXCEL fixed12
 
 on:
+  push:
+    branches:
+      - fixed12-fcm-review
+    paths:
+      - 'CREDIXCEL-CONTROL--fixed12-fcm.zip'
+      - '.github/workflows/review-fixed12.yml'
   workflow_dispatch:
 
 permissions:
