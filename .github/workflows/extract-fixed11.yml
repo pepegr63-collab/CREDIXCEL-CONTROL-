@@ -2,6 +2,11 @@ name: Extract fixed11 sources (temporary)
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fixed11-extraction-temp
+    paths:
+      - ".github/workflows/extract-fixed11.yml"
 
 permissions:
   contents: read
@@ -57,9 +62,9 @@ jobs:
                       shutil.copyfileobj(src, dst)
 
           (output / "EXTRACTION_NOTES.txt").write_text(
-              "Sources extracted from CREDIXCEL-Control-fixed11-fcm-patch.zip.\\n"
-              "Credential/configuration files and generated build/dependency folders were intentionally excluded.\\n"
-              + ("Excluded entries:\\n" + "\\n".join(excluded) if excluded else "No entries excluded.\\n"),
+              "Sources extracted from CREDIXCEL-Control-fixed11-fcm-patch.zip.\n"
+              "Credential/configuration files and generated build/dependency folders were intentionally excluded.\n"
+              + ("Excluded entries:\n" + "\n".join(excluded) if excluded else "No entries excluded.\n"),
               encoding="utf-8"
           )
           print(f"Extracted source files: {sum(1 for p in output.rglob('*') if p.is_file())}")
