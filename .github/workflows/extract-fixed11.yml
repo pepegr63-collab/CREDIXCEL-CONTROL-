@@ -1,0 +1,79 @@
+name: Extract fixed11 sources (temporary)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout temporary branch
+        uses: actions/checkout@v4
+
+      - name: Extract fixed11 ZIP safely
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import PurePosixPath
+          from zipfile import ZipFile
+          from pathlib import Path
+          import shutil
+
+          archive = Path("CREDIXCEL-Control-fixed11-fcm-patch.zip")
+          output = Path("fixed11-source")
+          if not archive.is_file():
+              raise SystemExit(f"ZIP not found: {archive}")
+          shutil.rmtree(output, ignore_errors=True)
+          output.mkdir()
+
+          excluded = []
+          blocked_names = {
+              "google-services.json", "local.properties",
+              "keystore.jks", "release.keystore"
+          }
+          blocked_suffixes = {".jks", ".keystore", ".p12", ".pfx"}
+          blocked_dirs = {".git", ".gradle", "build", "node_modules"}
+
+          with ZipFile(archive) as zf:
+              for item in zf.infolist():
+                  raw = item.filename
+                  path = PurePosixPath(raw)
+                  if path.is_absolute() or ".." in path.parts:
+                      raise SystemExit(f"Unsafe ZIP path rejected: {raw}")
+                  if item.is_dir():
+                      continue
+                  if any(part in blocked_dirs for part in path.parts):
+                      excluded.append(raw)
+                      continue
+                  if path.name in blocked_names or path.suffix.lower() in blocked_suffixes or path.name.startswith(".env"):
+                      excluded.append(raw)
+                      continue
+                  destination = output.joinpath(*path.parts)
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  with zf.open(item) as src, destination.open("wb") as dst:
+                      shutil.copyfileobj(src, dst)
+
+          (output / "EXTRACTION_NOTES.txt").write_text(
+              "Sources extracted from CREDIXCEL-Control-fixed11-fcm-patch.zip.\\n"
+              "Credential/configuration files and generated build/dependency folders were intentionally excluded.\\n"
+              + ("Excluded entries:\\n" + "\\n".join(excluded) if excluded else "No entries excluded.\\n"),
+              encoding="utf-8"
+          )
+          print(f"Extracted source files: {sum(1 for p in output.rglob('*') if p.is_file())}")
+          print(f"Excluded entries: {len(excluded)}")
+          PY
+
+      - name: Package extracted sources
+        run: |
+          zip -qr fixed11-source-sanitized.zip fixed11-source
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixed11-source-sanitized
+          path: fixed11-source-sanitized.zip
+          if-no-files-found: error
+          retention-days: 7
