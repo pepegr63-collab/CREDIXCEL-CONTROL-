@@ -1,0 +1,67 @@
+name: Revisar fuente CREDIXCEL fixed12
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract-and-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validar y extraer ZIP fixed12
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="CREDIXCEL-CONTROL--fixed12-fcm.zip"
+          test -s "$ZIP" || { echo "::error::No se encontró $ZIP en la raíz"; exit 1; }
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import shutil
+
+          archive = Path("CREDIXCEL-CONTROL--fixed12-fcm.zip")
+          target = Path("fixed12-extracted").resolve()
+          if target.exists():
+              shutil.rmtree(target)
+          target.mkdir()
+          with ZipFile(archive) as z:
+              bad = z.testzip()
+              if bad:
+                  raise SystemExit(f"ZIP dañado: {bad}")
+              members = z.infolist()
+              if not members:
+                  raise SystemExit("ZIP vacío")
+              for item in members:
+                  name = item.filename.replace("\\", "/")
+                  p = Path(name)
+                  if p.is_absolute() or ".." in p.parts:
+                      raise SystemExit(f"Ruta insegura dentro del ZIP: {item.filename}")
+                  dest = (target / p).resolve()
+                  if target not in dest.parents and dest != target:
+                      raise SystemExit(f"Ruta fuera del destino: {item.filename}")
+              z.extractall(target)
+          files = [p for p in target.rglob("*") if p.is_file()]
+          print(f"ZIP válido. Archivos extraídos: {len(files)}")
+          for p in files[:80]:
+              print(p.relative_to(target))
+          if not any(p.name == "AndroidManifest.xml" or p.name == "build.gradle.kts" for p in files):
+              print("AVISO: no se detectaron archivos Android comunes en la raíz extraída.")
+          PY
+
+      - name: Publicar fuentes extraídas para auditoría
+        uses: actions/upload-artifact@v4
+        with:
+          name: CREDIXCEL-fixed12-fcm-fuentes
+          path: fixed12-extracted/
+          if-no-files-found: error
+          retention-days: 7
