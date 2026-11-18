@@ -151,5 +151,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CREDIXCEL-fixed12-review-release-1.2.4
-          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/release/*.apk
+          path: ${{ runner.temp }}/credixcel-source/**/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
