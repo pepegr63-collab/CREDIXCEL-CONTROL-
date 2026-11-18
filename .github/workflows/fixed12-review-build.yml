@@ -1,4 +1,4 @@
-name: CREDIXCEL fixed12 review build
+name: CREDIXCEL fixed12 signed release build
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  fixed12-debug:
+  fixed12-release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout isolated review branch
@@ -33,6 +33,7 @@ jobs:
       - name: Extract fixed11 FCM source archive
         shell: bash
         run: |
+          set -euo pipefail
           test -f CREDIXCEL-Control-fixed11-fcm-patch.zip
           mkdir -p "$RUNNER_TEMP/credixcel-source"
           unzip -q CREDIXCEL-Control-fixed11-fcm-patch.zip -d "$RUNNER_TEMP/credixcel-source"
@@ -40,20 +41,40 @@ jobs:
           test -n "$PROJECT"
           echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
 
-      - name: Apply fixed12 review corrections
+      - name: Restore Android release signing key
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "Falta ANDROID_KEYSTORE_BASE64"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/credixcel-signing"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
+          test -s "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
+          chmod 600 "$RUNNER_TEMP/credixcel-signing/credixcel-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/credixcel-signing/credixcel-release.jks" >> "$GITHUB_ENV"
+
+      - name: Apply fixed12 corrections and release version
         shell: bash
         run: |
           python3 - <<'PY'
           import os
+          import re
           from pathlib import Path
 
           root = Path(os.environ["PROJECT_DIR"])
           gradle_file = root / "android/app/build.gradle.kts"
           text = gradle_file.read_text()
 
+          # The installed 1.2.3 is versionCode 24. The update must be 25.
+          text, code_count = re.subn(r'(?m)^(\\s*versionCode\\s*=\\s*)\\d+', r'\\g<1>25', text)
+          text, name_count = re.subn(r'(?m)^(\\s*versionName\\s*=\\s*)["\\'][^"\\']+["\\']', r'\\g<1>"1.2.4"', text)
+          if code_count != 1 or name_count != 1:
+              raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
+
           start = text.index('    signingConfigs {')
-          end = text.index('\n\n    compileOptions', start)
-          replacement = '''    // Release signing is optional for CI Debug builds.
+          end = text.index('\\n\\n    compileOptions', start)
+          replacement = '''    // Release signing uses the repository Actions secrets restored by the workflow.
               val releaseStorePath = System.getenv("ANDROID_KEYSTORE_PATH")
               val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
               val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
@@ -73,8 +94,12 @@ jobs:
                   }
               }'''
           text = text[:start] + replacement + text[end:]
+
+          target = '            signingConfig = signingConfigs.getByName("release")'
+          if target not in text:
+              raise SystemExit("No se encontró la asignación de signingConfig release esperada")
           text = text.replace(
-              '            signingConfig = signingConfigs.getByName("release")',
+              target,
               '            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")',
               1
           )
@@ -83,24 +108,49 @@ jobs:
           service = root / "android/app/src/main/java/com/credixcel/control/messaging/CredixcelMessagingService.kt"
           kotlin = service.read_text()
           start = kotlin.index('                val homeCleared = DeviceActions.clearKioskConfiguration(this)')
-          end = kotlin.index('\n            }\n            else -> return', start)
+          end = kotlin.index('\\n            }\\n            else -> return', start)
           replacement = '''                // FirebaseMessagingService cannot stop or verify the Activity Lock Task session.
                           // Keep protection active; authenticated MainActivity sync must verify release.
                           prefs.protectionActive = true
                           "UNLOCK_DEFERRED_ACTIVITY_SYNC_UNVERIFIED"'''
           service.write_text(kotlin[:start] + replacement + kotlin[end:])
-          print("Correcciones fixed12 aplicadas.")
+
+          print("fixed12: versionName=1.2.4, versionCode=25; release signing configured.")
           PY
 
       - name: Validate backend syntax
         run: node --check "$PROJECT_DIR/server/src/server.js"
 
-      - name: Compile Android Debug APK
-        run: gradle --no-daemon -p "$PROJECT_DIR" :android:app:assembleDebug
+      - name: Build signed Android Release APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+          gradle --no-daemon -p "$PROJECT_DIR" :android:app:assembleRelease
 
-      - name: Upload APK artifact
+      - name: Verify APK package, version, and signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find "$PROJECT_DIR/android/app/build/outputs/apk/release" -name '*.apk' -type f | head -n 1)"
+          test -n "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\\.credixcel\\.control' versionCode='25' versionName='1\\.2\\.4'"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+
+      - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-fixed12-review-debug
-          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/*.apk
+          name: CREDIXCEL-fixed12-review-release-1.2.4
+          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
