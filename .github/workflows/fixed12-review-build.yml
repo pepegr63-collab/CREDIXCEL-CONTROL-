@@ -67,13 +67,13 @@ jobs:
           text = gradle_file.read_text()
 
           # The installed 1.2.3 is versionCode 24. The update must be 25.
-          text, code_count = re.subn(r'(?m)^(\\s*versionCode\\s*=\\s*)\\d+', r'\\g<1>25', text)
-          text, name_count = re.subn(r'(?m)^(\\s*versionName\\s*=\\s*)["\\'][^"\\']+["\\']', r'\\g<1>"1.2.4"', text)
+          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>25', text)
+          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*)["\'][^"\']+["\']', r'\g<1>"1.2.4"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
 
           start = text.index('    signingConfigs {')
-          end = text.index('\\n\\n    compileOptions', start)
+          end = text.index('\n\n    compileOptions', start)
           replacement = '''    // Release signing uses the repository Actions secrets restored by the workflow.
               val releaseStorePath = System.getenv("ANDROID_KEYSTORE_PATH")
               val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
@@ -108,7 +108,7 @@ jobs:
           service = root / "android/app/src/main/java/com/credixcel/control/messaging/CredixcelMessagingService.kt"
           kotlin = service.read_text()
           start = kotlin.index('                val homeCleared = DeviceActions.clearKioskConfiguration(this)')
-          end = kotlin.index('\\n            }\\n            else -> return', start)
+          end = kotlin.index('\n            }\n            else -> return', start)
           replacement = '''                // FirebaseMessagingService cannot stop or verify the Activity Lock Task session.
                           // Keep protection active; authenticated MainActivity sync must verify release.
                           prefs.protectionActive = true
@@ -124,7 +124,6 @@ jobs:
       - name: Build signed Android Release APK
         shell: bash
         env:
-          ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -145,7 +144,7 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\\.credixcel\\.control' versionCode='25' versionName='1\\.2\\.4'"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='25' versionName='1\.2\.4'"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload signed APK artifact
