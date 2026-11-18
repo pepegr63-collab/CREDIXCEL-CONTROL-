@@ -68,7 +68,7 @@ jobs:
 
           # The installed 1.2.3 is versionCode 24. The update must be 25.
           text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>25', text)
-          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*)["\'][^"\']+["\']', r'\g<1>"1.2.4"', text)
+          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.4"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
 
