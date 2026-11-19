@@ -214,7 +214,6 @@ jobs:
                                       else false to "LOCK_FAILED_PROTECTION_RETAINED"
                                   }
                                   "PING" -> true to "PING_RECEIVED"
-
                                   else -> false to "UNSUPPORTED_COMMAND_ACTION:${claimed.action}"
                               }
 
