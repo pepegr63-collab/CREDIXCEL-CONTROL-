@@ -228,6 +228,9 @@ app.post('/api/device/commands/ack', async (req, res, next) => {
         [now(), deviceId]
       );
       await audit('DEVICE_LOCKED_REMOTE', 'device', deviceId, commandId);
+    } else if (ok && command.rows[0].action === 'PING') {
+      // PING only proves FCM delivery + authenticated claim/ACK. It never changes device state.
+      await audit('DEVICE_PING_ACKNOWLEDGED', 'device', deviceId, commandId);
     } else if (!ok) {
       await audit('DEVICE_COMMAND_FAILED', 'device', deviceId, String(result).slice(0, 500));
     }
@@ -374,6 +377,48 @@ app.post('/api/admin/devices/:id/lock', admin, async (req, res, next) => {
       );
       await audit('DEVICE_LOCK_COMMAND_SEND_FAILED', 'device', device.id, String(sendError.message).slice(0, 300));
       res.status(502).json({ error: 'No se pudo enviar la notificación al dispositivo.' });
+    }
+  } catch (e) { next(e); }
+});
+
+app.post('/api/admin/devices/:id/ping', admin, async (req, res, next) => {
+  try {
+    if (!firebaseMessaging) {
+      return res.status(503).json({ error: 'Firebase Cloud Messaging no está configurado en el servidor.' });
+    }
+    const found = await pool.query(
+      'SELECT id, status, fcm_token FROM devices WHERE id=$1',
+      [req.params.id]
+    );
+    const device = found.rows[0];
+    if (!device) return res.status(404).json({ error: 'Equipo no encontrado.' });
+    if (device.status !== 'ACTIVE') {
+      return res.status(409).json({ error: 'PING solo está permitido para equipos en estado ACTIVE.' });
+    }
+    if (!device.fcm_token) {
+      return res.status(409).json({ error: 'El equipo todavía no ha registrado su token FCM. Abre la aplicación y sincroniza.' });
+    }
+
+    const commandId = id();
+    await pool.query(
+      "INSERT INTO device_commands(id,device_id,action,status,created_at,sent_at) VALUES($1,$2,'PING','SENT',$3,$3)",
+      [commandId, device.id, now()]
+    );
+    try {
+      await firebaseMessaging.send({
+        token: device.fcm_token,
+        data: { commandId, deviceId: device.id, action: 'PING' },
+        android: { priority: 'high' }
+      });
+      await audit('DEVICE_PING_SENT', 'device', device.id, commandId);
+      res.json({ queued: true, commandId, action: 'PING', message: 'PING enviado; no modifica el estado ni bloquea el equipo.' });
+    } catch (sendError) {
+      await pool.query(
+        "UPDATE device_commands SET status='FAILED', completed_at=$1, result=$2 WHERE id=$3",
+        [now(), String(sendError.message).slice(0, 500), commandId]
+      );
+      await audit('DEVICE_PING_SEND_FAILED', 'device', device.id, String(sendError.message).slice(0, 300));
+      res.status(502).json({ error: 'No se pudo enviar la prueba PING por FCM.' });
     }
   } catch (e) { next(e); }
 });
