@@ -136,8 +136,8 @@ jobs:
               api = api.replace("interface CredixcelApi {", command_dtos + "\\ninterface CredixcelApi {", 1)
           if "/api/device/commands/claim" not in api:
               api, endpoint_count = re.subn(
-                  r'(    @POST\\("/api/device/orders/ack"\\)\\n    suspend fun acknowledgeOrder\\([^\\n]+\\)\\n)',
-                  r'\\1\\n    @POST("/api/device/commands/claim")\\n    suspend fun claimCommand(@Body body: CommandClaimRequest): CommandClaimResponse\\n\\n    @POST("/api/device/commands/ack")\\n    suspend fun acknowledgeCommand(@Body body: CommandAckRequest): Map<String, Boolean>\\n',
+                  r'(    @POST\("/api/device/orders/ack"\)\n    suspend fun acknowledgeOrder\([^\n]+\)\n)',
+                  r'\1\n    @POST("/api/device/commands/claim")\n    suspend fun claimCommand(@Body body: CommandClaimRequest): CommandClaimResponse\n\n    @POST("/api/device/commands/ack")\n    suspend fun acknowledgeCommand(@Body body: CommandAckRequest): Map<String, Boolean>\n',
                   api,
                   count=1
               )
