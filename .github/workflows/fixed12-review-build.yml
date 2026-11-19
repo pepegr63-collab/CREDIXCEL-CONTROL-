@@ -108,16 +108,7 @@ jobs:
           # Bridge the Android receiver to the command protocol currently deployed on Render.
           api_file = root / "android/app/src/main/java/com/credixcel/control/network/Api.kt"
           api = api_file.read_text()
-          order_ack_dto = """@Serializable
-          data class OrderAckRequest(
-              val deviceId: String,
-              val deviceToken: String,
-              val orderId: String,
-              val status: String,
-              val result: String
-          )
-          """
-          command_dtos = """
+          command_dtos = '''
           // Current Render device_commands protocol.
           @Serializable
           data class CommandClaimRequest(
@@ -140,33 +131,27 @@ jobs:
               val success: Boolean,
               val result: String
           )
-          """
+          '''
           if "data class CommandClaimRequest" not in api:
-              if order_ack_dto not in api:
-                  raise SystemExit("No se encontró el DTO OrderAckRequest para agregar el protocolo Render.")
-              api = api.replace(order_ack_dto, order_ack_dto + command_dtos, 1)
-          api_endpoints = """
-              @POST("/api/device/commands/claim")
-              suspend fun claimCommand(@Body body: CommandClaimRequest): CommandClaimResponse
-
-              @POST("/api/device/commands/ack")
-              suspend fun acknowledgeCommand(@Body body: CommandAckRequest): Map<String, Boolean>
-          """
+              api = api.replace("interface CredixcelApi {", command_dtos + "\\ninterface CredixcelApi {", 1)
           if "/api/device/commands/claim" not in api:
-              old_endpoint = """              @POST("/api/device/orders/ack")
-              suspend fun acknowledgeOrder(@Body body: OrderAckRequest): Map<String, Boolean>
-          """
-              if old_endpoint not in api:
-                  raise SystemExit("No se encontró el endpoint legacy orders/ack.")
-              api = api.replace(old_endpoint, old_endpoint + api_endpoints, 1)
+              api, endpoint_count = re.subn(
+                  r'(    @POST\\("/api/device/orders/ack"\\)\\n    suspend fun acknowledgeOrder\\([^\\n]+\\)\\n)',
+                  r'\\1\\n    @POST("/api/device/commands/claim")\\n    suspend fun claimCommand(@Body body: CommandClaimRequest): CommandClaimResponse\\n\\n    @POST("/api/device/commands/ack")\\n    suspend fun acknowledgeCommand(@Body body: CommandAckRequest): Map<String, Boolean>\\n',
+                  api,
+                  count=1
+              )
+              if endpoint_count != 1:
+                  raise SystemExit("No se encontró el endpoint legacy para agregar claim/ack de Render.")
           api_file.write_text(api)
 
           service = root / "android/app/src/main/java/com/credixcel/control/messaging/CredixcelMessagingService.kt"
           kotlin = service.read_text()
-          old_receiver = """        val data = message.data
+          if "processServerCommand" not in kotlin:
+              old_receiver = '''        val data = message.data
                   val orderId = data["orderId"] ?: return
-          """
-          new_receiver = """        val data = message.data
+          '''
+              new_receiver = '''        val data = message.data
                   val prefs = Prefs(applicationContext)
 
                   // Render envía commandId/deviceId/action y requiere claim + ACK autenticados.
@@ -180,22 +165,21 @@ jobs:
                   }
 
                   val orderId = data["orderId"] ?: return
-          """
-          if "processServerCommand" not in kotlin:
+          '''
               if old_receiver not in kotlin:
                   raise SystemExit("No se encontró el inicio del receptor FCM legacy.")
               kotlin = kotlin.replace(old_receiver, new_receiver, 1)
               kotlin = kotlin.replace(
-                  """                  val signature = data["signature"] ?: return
-                          val prefs = Prefs(applicationContext)
-                          val deviceId = prefs.deviceId ?: return
-              """,
-                  """                  val signature = data["signature"] ?: return
-                          val deviceId = prefs.deviceId ?: return
-              """,
+                  '''        val signature = data["signature"] ?: return
+                  val prefs = Prefs(applicationContext)
+                  val deviceId = prefs.deviceId ?: return
+          ''',
+                  '''        val signature = data["signature"] ?: return
+                  val deviceId = prefs.deviceId ?: return
+          ''',
                   1
               )
-              helper = """    /** Claim and execute a command using the authenticated Render API. */
+              helper = '''    /** Claim and execute a command using the authenticated Render API. */
               private fun processServerCommand(
                   prefs: Prefs,
                   pushedDeviceId: String,
@@ -238,9 +222,8 @@ jobs:
                   }
               }
 
-          """
-              anchor = """              private fun registerToken(prefs: Prefs, fcmToken: String) {
-          """
+          '''
+              anchor = "    private fun registerToken(prefs: Prefs, fcmToken: String) {"
               if anchor not in kotlin:
                   raise SystemExit("No se encontró registerToken para insertar el procesador de órdenes.")
               kotlin = kotlin.replace(anchor, helper + anchor, 1)
