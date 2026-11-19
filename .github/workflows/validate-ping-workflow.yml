@@ -1,0 +1,25 @@
+name: Validate fixed12 PING workflow
+
+on:
+  push:
+    branches:
+      - fixed12-fcm-review
+    paths:
+      - '.github/workflows/fixed12-review-build.yml'
+      - '.github/workflows/validate-ping-workflow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz | tar -xz actionlint
+          chmod +x actionlint
+      - name: Validate GitHub Actions workflow
+        run: ./actionlint .github/workflows/fixed12-review-build.yml
