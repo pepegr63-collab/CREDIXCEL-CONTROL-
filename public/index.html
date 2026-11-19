@@ -135,6 +135,25 @@ async function loadDevices() {
       const info = document.createElement('p');
       info.textContent = `Estado: ${d.status} · Firebase: ${d.fcm_registered ? 'Token registrado' : 'Pendiente'} · Cliente: ${d.client_name || 'Sin asignar'} · Código: ${d.enrollment_code}`;
 
+      const pingButton = document.createElement('button');
+      pingButton.textContent = 'Probar conexión FCM (PING)';
+      pingButton.disabled = !d.fcm_registered || d.status !== 'ACTIVE';
+      pingButton.onclick = async () => {
+        if (!confirm('Enviar PING de prueba. No bloquea el equipo ni cambia su estado. ¿Continuar?')) return;
+        pingButton.disabled = true;
+        try {
+          const result = await api('/api/admin/devices/' + encodeURIComponent(d.id) + '/ping', {
+            method: 'POST',
+            body: '{}'
+          });
+          alert(result.message + '\nID: ' + result.commandId);
+        } catch(e) {
+          alert(e.message);
+        } finally {
+          pingButton.disabled = false;
+        }
+      };
+
       const imeiTitle = document.createElement('h4');
       imeiTitle.textContent = 'Identificadores IMEI';
 
@@ -218,6 +237,7 @@ async function loadDevices() {
       card.append(
         title,
         info,
+        pingButton,
         imeiTitle,
         imeiNote,
         imei1Label,
