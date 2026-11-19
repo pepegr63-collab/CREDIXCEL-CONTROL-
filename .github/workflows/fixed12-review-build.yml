@@ -66,9 +66,222 @@ jobs:
           gradle_file = root / "android/app/build.gradle.kts"
           text = gradle_file.read_text()
 
-          # The installed 1.2.4 is versionCode 25. The FCM correction must be 1.2.5 / 26.
-          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>26', text)
-          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.5"', text)
+          # The installed 1.2.5 is versionCode 26. The harmless FCM PING test is 1.2.6 / 27.
+          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>27', text)
+          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+
+          if code_count != 1 or name_count != 1:
+              raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
+
+          start = text.index('    signingConfigs {')
+          end = text.index('\n\n    compileOptions', start)
+          replacement = '''    // Release signing uses the repository Actions secrets restored by the workflow.
+              val releaseStorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+              val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+              val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+              val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+              val hasReleaseSigning = listOf(
+                  releaseStorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword
+              ).all { !it.isNullOrBlank() }
+
+              if (hasReleaseSigning) {
+                  signingConfigs {
+                      create("release") {
+                          storeFile = file(releaseStorePath!!)
+                          storePassword = releaseStorePassword!!
+                          keyAlias = releaseKeyAlias!!
+                          keyPassword = releaseKeyPassword!!
+                      }
+                  }
+              }'''
+          text = text[:start] + replacement + text[end:]
+
+          target = '            signingConfig = signingConfigs.getByName("release")'
+          if target not in text:
+              raise SystemExit("No se encontró la asignación de signingConfig release esperada")
+          text = text.replace(
+              target,
+              '            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")',
+              1
+          )
+          gradle_file.write_text(text)
+
+          # Bridge the Android receiver to the command protocol currently deployed on Render.
+          api_file = root / "android/app/src/main/java/com/credixcel/control/network/Api.kt"
+          api = api_file.read_text()
+          command_dtos = '''
+          // Current Render device_commands protocol.
+          @Serializable
+          data class CommandClaimRequest(
+              val deviceId: String,
+              val deviceToken: String,
+              val commandId: String
+          )
+
+          @Serializable
+          data class CommandClaimResponse(
+              val commandId: String,
+              val action: String
+          )
+
+          @Serializable
+          data class CommandAckRequest(
+              val deviceId: String,
+              val deviceToken: String,
+              val commandId: String,
+              val success: Boolean,
+              val result: String
+          )
+
+          @Serializable
+          data class CommandAckResponse(
+              val acknowledged: Boolean,
+              val status: String
+          )
+          '''
+          if "data class CommandClaimRequest" not in api:
+              api = api.replace("interface CredixcelApi {", command_dtos + "\ninterface CredixcelApi {", 1)
+          if "/api/device/commands/claim" not in api:
+              endpoint_marker = '    @POST("/api/device/orders/ack")'
+              if endpoint_marker not in api:
+                  raise SystemExit("No se encontró el endpoint legacy orders/ack para insertar claim/ack.")
+              new_endpoints = '    @POST("/api/device/commands/claim")\n    suspend fun claimCommand(@Body body: CommandClaimRequest): CommandClaimResponse\n\n    @POST("/api/device/commands/ack")\n    suspend fun acknowledgeCommand(@Body body: CommandAckRequest): CommandAckResponse\n\n'
+              api = api.replace(endpoint_marker, new_endpoints + endpoint_marker, 1)
+          api_file.write_text(api)
+
+          service = root / "android/app/src/main/java/com/credixcel/control/messaging/CredixcelMessagingService.kt"
+          kotlin = service.read_text()
+          if "processServerCommand" not in kotlin:
+              old_receiver = '''        val data = message.data
+                  val orderId = data["orderId"] ?: return
+          '''
+              new_receiver = '''        val data = message.data
+                  val prefs = Prefs(applicationContext)
+
+                  // Render envía commandId/deviceId/action y requiere claim + ACK autenticados.
+                  // El protocolo legacy orderId/HMAC permanece disponible como respaldo.
+                  val commandId = data["commandId"]
+                  if (commandId != null) {
+                      val pushedDeviceId = data["deviceId"] ?: return
+                      val commandAction = data["action"] ?: return
+                      processServerCommand(prefs, pushedDeviceId, commandId, commandAction)
+                      return
+                  }
+
+                  val orderId = data["orderId"] ?: return
+          '''
+              if old_receiver not in kotlin:
+                  raise SystemExit("No se encontró el inicio del receptor FCM legacy.")
+              kotlin = kotlin.replace(old_receiver, new_receiver, 1)
+              kotlin = kotlin.replace(
+                  '''        val signature = data["signature"] ?: return
+                  val prefs = Prefs(applicationContext)
+                  val deviceId = prefs.deviceId ?: return
+          ''',
+                  '''        val signature = data["signature"] ?: return
+                  val deviceId = prefs.deviceId ?: return
+          ''',
+                  1
+              )
+              helper = '''    /** Claim and execute a command using the authenticated Render API. */
+              private fun processServerCommand(
+                  prefs: Prefs,
+                  pushedDeviceId: String,
+                  commandId: String,
+                  pushedAction: String
+              ) {
+                  val deviceId = prefs.deviceId ?: return
+                  val deviceToken = prefs.token ?: return
+                  if (pushedDeviceId != deviceId) return
+
+                  CoroutineScope(Dispatchers.IO).launch {
+                      runCatching {
+                          val serviceApi = api(prefs.serverUrl)
+                          val claimed = serviceApi.claimCommand(
+                              com.credixcel.control.network.CommandClaimRequest(deviceId, deviceToken, commandId)
+                          )
+
+                          val (success, result) =
+                              if (claimed.commandId != commandId || claimed.action != pushedAction) {
+                                  false to "COMMAND_PAYLOAD_MISMATCH"
+                              } else when (claimed.action) {
+                                  "LOCK_DEVICE" -> {
+                                      prefs.protectionActive = true
+                                      val configured = DeviceActions.isDeviceOwner(this@CredixcelMessagingService) &&
+                                          DeviceActions.configureKiosk(this@CredixcelMessagingService) &&
+                                          DeviceActions.applyFinancingProtection(this@CredixcelMessagingService)
+                                      val locked = configured && DeviceActions.lock(this@CredixcelMessagingService)
+                                      if (locked) true to "LOCKED_BY_FCM_COMMAND"
+                                      else false to "LOCK_FAILED_PROTECTION_RETAINED"
+                                  }
+                                  "PING" -> true to "PING_RECEIVED"
+
+                                  else -> false to "UNSUPPORTED_COMMAND_ACTION:${claimed.action}"
+                              }
+
+                          serviceApi.acknowledgeCommand(
+                              com.credixcel.control.network.CommandAckRequest(
+                                  deviceId, deviceToken, commandId, success, result
+                              )
+                          )
+                      }
+                  }
+              }
+
+          '''
+              anchor = "    private fun registerToken(prefs: Prefs, fcmToken: String) {"
+              if anchor not in kotlin:
+                  raise SystemExit("No se encontró registerToken para insertar el procesador de órdenes.")
+              kotlin = kotlin.replace(anchor, helper + anchor, 1)
+          service.write_text(kotlin)
+
+          # Keep the legacy unlock deferral: a background Firebase service cannot verify Activity Lock Task exit.
+          start = kotlin.index('                val homeCleared = DeviceActions.clearKioskConfiguration(this)')
+          end = kotlin.index('\n            }\n            else -> return', start)
+          replacement = '''                // FirebaseMessagingService cannot stop or verify the Activity Lock Task session.
+                          // Keep protection active; authenticated MainActivity sync must verify release.
+                          prefs.protectionActive = true
+                          "UNLOCK_DEFERRED_ACTIVITY_SYNC_UNVERIFIED"'''
+          service.write_text(kotlin[:start] + replacement + kotlin[end:])
+
+          print("fixed12 PING: versionName=1.2.6, versionCode=27; PING is non-destructive and ACK-only.")
+          PY
+
+      - name: Validate backend syntax
+        run: node --check "$PROJECT_DIR/server/src/server.js"
+
+      - name: Build signed Android Release APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+          gradle --no-daemon -p "$PROJECT_DIR" :android:app:assembleRelease
+
+      - name: Verify APK package, version, and signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find "$PROJECT_DIR/android/app/build/outputs/apk/release" -name '*.apk' -type f | head -n 1)"
+          test -n "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='27' versionName='1\.2\.6'"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CREDIXCEL-fixed12-ping-review-release-1.2.6
+          path: ${{ runner.temp }}/credixcel-source/**/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+, r'\g<1>"1.2.6"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
 
