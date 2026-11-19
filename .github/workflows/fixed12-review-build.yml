@@ -133,12 +133,12 @@ jobs:
           )
           '''
           if "data class CommandClaimRequest" not in api:
-              api = api.replace("interface CredixcelApi {", command_dtos + "\\ninterface CredixcelApi {", 1)
+              api = api.replace("interface CredixcelApi {", command_dtos + "\ninterface CredixcelApi {", 1)
           if "/api/device/commands/claim" not in api:
               endpoint_marker = '    @POST("/api/device/orders/ack")'
               if endpoint_marker not in api:
                   raise SystemExit("No se encontró el endpoint legacy orders/ack para insertar claim/ack.")
-              new_endpoints = '    @POST("/api/device/commands/claim")\\n    suspend fun claimCommand(@Body body: CommandClaimRequest): CommandClaimResponse\\n\\n    @POST("/api/device/commands/ack")\\n    suspend fun acknowledgeCommand(@Body body: CommandAckRequest): Map<String, Boolean>\\n\\n'
+              new_endpoints = '    @POST("/api/device/commands/claim")\n    suspend fun claimCommand(@Body body: CommandClaimRequest): CommandClaimResponse\n\n    @POST("/api/device/commands/ack")\n    suspend fun acknowledgeCommand(@Body body: CommandAckRequest): Map<String, Boolean>\n\n'
               api = api.replace(endpoint_marker, new_endpoints + endpoint_marker, 1)
           api_file.write_text(api)
 
