@@ -66,9 +66,9 @@ jobs:
           gradle_file = root / "android/app/build.gradle.kts"
           text = gradle_file.read_text()
 
-          # The installed 1.2.3 is versionCode 24. The update must be 25.
-          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>25', text)
-          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.4"', text)
+          # The installed 1.2.4 is versionCode 25. The FCM correction must be 1.2.5 / 26.
+          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>26', text)
+          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.5"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
 
@@ -241,7 +241,7 @@ jobs:
                           "UNLOCK_DEFERRED_ACTIVITY_SYNC_UNVERIFIED"'''
           service.write_text(kotlin[:start] + replacement + kotlin[end:])
 
-          print("fixed12: versionName=1.2.4, versionCode=25; release signing configured.")
+          print("fixed12: versionName=1.2.5, versionCode=26; release signing configured.")
           PY
 
       - name: Validate backend syntax
@@ -270,12 +270,12 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='25' versionName='1\.2\.4'"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='26' versionName='1\.2\.5'"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-fixed12-review-release-1.2.4
+          name: CREDIXCEL-fixed12-review-release-1.2.5
           path: ${{ runner.temp }}/credixcel-source/**/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
