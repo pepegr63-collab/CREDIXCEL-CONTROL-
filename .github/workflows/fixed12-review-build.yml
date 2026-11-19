@@ -135,14 +135,19 @@ jobs:
           if "data class CommandClaimRequest" not in api:
               api = api.replace("interface CredixcelApi {", command_dtos + "\\ninterface CredixcelApi {", 1)
           if "/api/device/commands/claim" not in api:
-              api, endpoint_count = re.subn(
-                  r'(    @POST\("/api/device/orders/ack"\)\n    suspend fun acknowledgeOrder\([^\n]+\)\n)',
-                  r'\1\n    @POST("/api/device/commands/claim")\n    suspend fun claimCommand(@Body body: CommandClaimRequest): CommandClaimResponse\n\n    @POST("/api/device/commands/ack")\n    suspend fun acknowledgeCommand(@Body body: CommandAckRequest): Map<String, Boolean>\n',
-                  api,
-                  count=1
-              )
-              if endpoint_count != 1:
-                  raise SystemExit("No se encontró el endpoint legacy para agregar claim/ack de Render.")
+              old_endpoint = '''    @POST("/api/device/orders/ack")
+              suspend fun acknowledgeOrder(@Body body: OrderAckRequest): Map<String, Boolean>
+              '''
+              new_endpoints = old_endpoint + '''
+              @POST("/api/device/commands/claim")
+              suspend fun claimCommand(@Body body: CommandClaimRequest): CommandClaimResponse
+
+              @POST("/api/device/commands/ack")
+              suspend fun acknowledgeCommand(@Body body: CommandAckRequest): Map<String, Boolean>
+              '''
+              if old_endpoint not in api:
+                  raise SystemExit("No se encontró el endpoint legacy orders/ack para insertar claim/ack.")
+              api = api.replace(old_endpoint, new_endpoints, 1)
           api_file.write_text(api)
 
           service = root / "android/app/src/main/java/com/credixcel/control/messaging/CredixcelMessagingService.kt"
