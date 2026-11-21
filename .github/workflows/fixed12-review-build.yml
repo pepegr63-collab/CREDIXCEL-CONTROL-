@@ -1,4 +1,4 @@
-name: CREDIXCEL fixed12 signed release build
+name: CREDIXCEL fixed12 managed screen release build
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ on:
     paths:
       - 'CREDIXCEL-Control-fixed11-fcm-patch.zip'
       - '.github/workflows/fixed12-review-build.yml'
+      - 'scripts/fixed12-managed-screen.py.gz.b64'
 
 permissions:
   contents: read
@@ -66,9 +67,9 @@ jobs:
           gradle_file = root / "android/app/build.gradle.kts"
           text = gradle_file.read_text()
 
-          # The installed 1.2.5 is versionCode 26. The harmless FCM PING test is 1.2.6 / 27.
-          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>27', text)
-          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.6"', text)
+          # The installed 1.2.6 is versionCode 27. This managed-screen review release is 1.2.7 / 28.
+          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>28', text)
+          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.7"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
 
@@ -245,6 +246,13 @@ jobs:
           print("fixed12 PING: versionName=1.2.6, versionCode=27; PING is non-destructive and ACK-only.")
           PY
 
+      - name: Apply CREDIXCEL managed administrative screen
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode scripts/fixed12-managed-screen.py.gz.b64 | gzip -d > "$RUNNER_TEMP/fixed12-managed-screen.py"
+          python3 "$RUNNER_TEMP/fixed12-managed-screen.py" "$PROJECT_DIR"
+
       - name: Validate backend syntax
         run: node --check "$PROJECT_DIR/server/src/server.js"
 
@@ -271,12 +279,12 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='27' versionName='1\.2\.6'"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='28' versionName='1\.2\.7'"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-fixed12-ping-review-release-1.2.6
+          name: CREDIXCEL-fixed12-managed-screen-release-1.2.7
           path: ${{ runner.temp }}/credixcel-source/**/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
