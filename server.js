@@ -211,30 +211,49 @@ app.post('/api/device/commands/ack', async (req, res, next) => {
       [deviceId, deviceToken]
     );
     if (!device.rowCount) return res.status(401).json({ error: 'Dispositivo no autorizado.' });
+
     const command = await pool.query(
-      `SELECT action FROM device_commands
-       WHERE id=$1 AND device_id=$2 AND status='PROCESSING'`,
+      'SELECT action, status, result FROM device_commands WHERE id=$1 AND device_id=$2',
       [commandId, deviceId]
     );
-    if (!command.rowCount) return res.status(404).json({ error: 'Orden no encontrada o ya procesada.' });
+    if (!command.rowCount) return res.status(404).json({ error: 'Orden no encontrada.' });
+
     const ok = success === true;
+    const finalStatus = ok ? 'EXECUTED' : 'FAILED';
+    const safeResult = String(result).slice(0, 500);
+
+    // An ACK whose response was lost may be safely retried by the device.
+    if (command.rows[0].status !== 'PROCESSING') {
+      if (command.rows[0].status === finalStatus && command.rows[0].result === safeResult) {
+        return res.json({ acknowledged: true, status: finalStatus, idempotent: true });
+      }
+      return res.status(409).json({ error: 'La orden ya fue finalizada con otro resultado.' });
+    }
+
     await pool.query(
       'UPDATE device_commands SET status=$1, completed_at=$2, result=$3 WHERE id=$4',
-      [ok ? 'EXECUTED' : 'FAILED', now(), String(result).slice(0, 500), commandId]
+      [finalStatus, now(), safeResult, commandId]
     );
+
     if (ok && command.rows[0].action === 'LOCK_DEVICE') {
       await pool.query(
-        "UPDATE devices SET status='LOCKED', message='Bloqueo remoto confirmado por el dispositivo', updated_at=$1 WHERE id=$2",
+        "UPDATE devices SET status='LOCKED', message='Pantalla administrativa CREDIXCEL confirmada por el dispositivo', updated_at=$1 WHERE id=$2",
         [now(), deviceId]
       );
       await audit('DEVICE_LOCKED_REMOTE', 'device', deviceId, commandId);
+    } else if (ok && command.rows[0].action === 'UNLOCK_DEVICE') {
+      await pool.query(
+        "UPDATE devices SET status='ACTIVE', message='Liberación administrativa CREDIXCEL confirmada por el dispositivo', updated_at=$1 WHERE id=$2",
+        [now(), deviceId]
+      );
+      await audit('DEVICE_UNLOCKED_REMOTE', 'device', deviceId, commandId);
     } else if (ok && command.rows[0].action === 'PING') {
       // PING only proves FCM delivery + authenticated claim/ACK. It never changes device state.
       await audit('DEVICE_PING_ACKNOWLEDGED', 'device', deviceId, commandId);
     } else if (!ok) {
-      await audit('DEVICE_COMMAND_FAILED', 'device', deviceId, String(result).slice(0, 500));
+      await audit('DEVICE_COMMAND_FAILED', 'device', deviceId, safeResult);
     }
-    res.json({ acknowledged: true, status: ok ? 'EXECUTED' : 'FAILED' });
+    res.json({ acknowledged: true, status: finalStatus });
   } catch (e) { next(e); }
 });
 
@@ -377,6 +396,56 @@ app.post('/api/admin/devices/:id/lock', admin, async (req, res, next) => {
       );
       await audit('DEVICE_LOCK_COMMAND_SEND_FAILED', 'device', device.id, String(sendError.message).slice(0, 300));
       res.status(502).json({ error: 'No se pudo enviar la notificación al dispositivo.' });
+    }
+  } catch (e) { next(e); }
+});
+
+app.post('/api/admin/devices/:id/unlock', admin, async (req, res, next) => {
+  try {
+    if (!firebaseMessaging) {
+      return res.status(503).json({ error: 'Firebase Cloud Messaging no está configurado en el servidor.' });
+    }
+    const found = await pool.query(
+      'SELECT id, status, fcm_token FROM devices WHERE id=$1',
+      [req.params.id]
+    );
+    const device = found.rows[0];
+    if (!device) return res.status(404).json({ error: 'Equipo no encontrado.' });
+    if (device.status !== 'LOCKED') {
+      return res.status(409).json({ error: 'Solo se puede liberar un equipo cuyo estado confirmado sea LOCKED.' });
+    }
+    if (!device.fcm_token) {
+      return res.status(409).json({ error: 'El equipo todavía no ha registrado su token FCM.' });
+    }
+
+    const contract = await pool.query(
+      'SELECT status FROM contracts WHERE device_id=$1 ORDER BY created_at DESC LIMIT 1',
+      [device.id]
+    );
+    if (!contract.rowCount || contract.rows[0].status !== 'ACTIVE') {
+      return res.status(409).json({ error: 'La liberación requiere un contrato ACTIVE.' });
+    }
+
+    const commandId = id();
+    await pool.query(
+      "INSERT INTO device_commands(id,device_id,action,status,created_at,sent_at) VALUES($1,$2,'UNLOCK_DEVICE','SENT',$3,$3)",
+      [commandId, device.id, now()]
+    );
+    try {
+      await firebaseMessaging.send({
+        token: device.fcm_token,
+        data: { commandId, deviceId: device.id, action: 'UNLOCK_DEVICE' },
+        android: { priority: 'high' }
+      });
+      await audit('DEVICE_UNLOCK_COMMAND_SENT', 'device', device.id, commandId);
+      res.json({ queued: true, commandId, message: 'Orden de liberación enviada; el estado será ACTIVE solo después del ACK autenticado del dispositivo.' });
+    } catch (sendError) {
+      await pool.query(
+        "UPDATE device_commands SET status='FAILED', completed_at=$1, result=$2 WHERE id=$3",
+        [now(), String(sendError.message).slice(0, 500), commandId]
+      );
+      await audit('DEVICE_UNLOCK_COMMAND_SEND_FAILED', 'device', device.id, String(sendError.message).slice(0, 300));
+      res.status(502).json({ error: 'No se pudo enviar la orden de liberación por FCM.' });
     }
   } catch (e) { next(e); }
 });
