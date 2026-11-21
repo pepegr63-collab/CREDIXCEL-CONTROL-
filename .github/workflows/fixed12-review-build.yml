@@ -257,7 +257,7 @@ jobs:
           p = Path(sys.argv[1])
           source = p.read_text(encoding="utf-8")
           source = source.replace("import androidx.activity.result.contract.ActivityResultContracts\\n", "")
-          source = source.replace("    private val requestNotificationsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }\\n", "")
+          source = source.replace("    private val requestNotificationsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }\n", "")
           source = source.replace("requestNotificationsPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)", "requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1207)")
           p.write_text(source, encoding="utf-8")
           PY
