@@ -60,6 +60,13 @@
       <button onclick="loadClients()">Consultar clientes</button>
       <pre id="clients"></pre>
     </section>
+
+    <section>
+      <h2>Auditoría</h2>
+      <p>Consulta los últimos 200 eventos registrados por el servidor.</p>
+      <button onclick="loadAudit()">Consultar auditoría</button>
+      <pre id="audit" aria-live="polite"></pre>
+    </section>
   </div>
 </main>
 <script>
@@ -261,6 +268,26 @@ async function loadDevices() {
     });
   } catch(e) {
     alert(e.message);
+  }
+}
+async function loadAudit() {
+  const root = document.getElementById('audit');
+  root.textContent = 'Consultando auditoría...';
+  try {
+    const rows = await api('/api/admin/audit');
+    if (!Array.isArray(rows) || rows.length === 0) {
+      root.textContent = 'No hay eventos de auditoría registrados.';
+      return;
+    }
+    root.textContent = rows.map(event => [
+      'Fecha: ' + (event.created_at || 'Sin fecha'),
+      'Acción: ' + (event.action || 'Sin acción'),
+      'Entidad: ' + (event.entity || ''),
+      'ID de entidad: ' + (event.entity_id || ''),
+      'Detalles: ' + (event.details || '')
+    ].join('\\n')).join('\\n\\n');
+  } catch (e) {
+    root.textContent = 'No se pudo consultar la auditoría: ' + e.message;
   }
 }
 function logout() {
