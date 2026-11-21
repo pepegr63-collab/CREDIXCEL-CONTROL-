@@ -207,44 +207,57 @@ async function loadDevices() {
         }
       };
 
-      const select = document.createElement('select');
+      const actionsTitle = document.createElement('h4');
+      actionsTitle.textContent = 'Control remoto CREDIXCEL';
 
-      [['ACTIVE','Activo'],['PAYMENT_DUE','Pago pendiente'],['LOCKED','Bloqueado']].forEach(([v,l]) => {
-        const o = document.createElement('option');
-        o.value = v;
-        o.textContent = l;
-        o.selected = d.status === v;
-        select.append(o);
-      });
-
-      const message = document.createElement('input');
-      message.placeholder = 'Mensaje para el equipo';
-      message.value = d.message || '';
-
-      const save = document.createElement('button');
-      save.textContent = 'Guardar estado';
-
-      save.onclick = async () => {
+      const lockButton = document.createElement('button');
+      lockButton.textContent = 'Enviar bloqueo CREDIXCEL';
+      lockButton.disabled = !d.fcm_registered || !['ACTIVE','PAYMENT_DUE'].includes(d.status);
+      lockButton.onclick = async () => {
+        if (!confirm('Enviar LOCK al equipo ' + (d.device_name || d.id) + '? La pantalla administrativa CREDIXCEL se activará cuando Android permita procesar la orden. Si la app está en segundo plano, puede ser necesario tocar la notificación en el equipo.')) return;
+        lockButton.disabled = true;
         try {
-          await api('/api/admin/devices/' + encodeURIComponent(d.id) + '/state', {
+          const result = await api('/api/admin/devices/' + encodeURIComponent(d.id) + '/lock', {
             method: 'POST',
-            body: JSON.stringify({
-              status: select.value,
-              message: message.value
-            })
+            body: '{}'
           });
-
-          alert('Estado actualizado.');
-          await loadDevices();
+          alert(result.message + '\\nID de orden: ' + result.commandId + '\\nEl estado no se considera LOCKED hasta recibir el ACK autenticado.');
         } catch(e) {
           alert(e.message);
+        } finally {
+          await loadDevices();
         }
       };
 
+      const unlockButton = document.createElement('button');
+      unlockButton.textContent = 'Enviar liberación CREDIXCEL';
+      unlockButton.disabled = !d.fcm_registered || d.status !== 'LOCKED' || d.contract_status !== 'ACTIVE';
+      unlockButton.onclick = async () => {
+        if (!confirm('Enviar UNLOCK al equipo ' + (d.device_name || d.id) + '? Solo se liberará la pantalla administrativa CREDIXCEL; no se modifica ni elimina el PIN, patrón o contraseña de Android.')) return;
+        unlockButton.disabled = true;
+        try {
+          const result = await api('/api/admin/devices/' + encodeURIComponent(d.id) + '/unlock', {
+            method: 'POST',
+            body: '{}'
+          });
+          alert(result.message + '\\nID de orden: ' + result.commandId + '\\nEl estado será ACTIVE solo después del ACK autenticado.');
+        } catch(e) {
+          alert(e.message);
+        } finally {
+          await loadDevices();
+        }
+      };
+
+      const controlNote = document.createElement('p');
+      controlNote.textContent = 'Las órdenes no cambian el estado por sí solas. El servidor espera confirmación autenticada del equipo. Android puede requerir tocar la notificación para abrir la pantalla CREDIXCEL.';
       card.append(
         title,
         info,
         pingButton,
+        actionsTitle,
+        lockButton,
+        unlockButton,
+        controlNote,
         imeiTitle,
         imeiNote,
         imei1Label,
