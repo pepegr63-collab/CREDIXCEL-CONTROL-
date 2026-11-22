@@ -6,6 +6,7 @@ on:
     branches:
       - fixed12-fcm-review
       - fixed12-locktask-fix
+      - fixed12-background-lock-fix
     paths:
       - 'CREDIXCEL-Control-fixed11-fcm-patch.zip'
       - '.github/workflows/fixed12-review-build.yml'
@@ -70,7 +71,7 @@ jobs:
           gradle_file = root / "android/app/build.gradle.kts"
           text = gradle_file.read_text()
 
-          # The installed 1.2.7 is versionCode 28. This background Lock Task review release is 1.2.9 / 30.
+          # The installed 1.2.8 is versionCode 29. This background Lock Task review release is 1.2.9 / 30.
           text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>30', text)
           text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.9"', text)
           if code_count != 1 or name_count != 1:
