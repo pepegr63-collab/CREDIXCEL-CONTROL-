@@ -248,6 +248,22 @@ async function loadDevices() {
         }
       };
 
+      const recoveryUnlockButton = document.createElement('button');
+      recoveryUnlockButton.textContent = 'Recuperación UNLOCK (sin contrato ACTIVE)';
+      recoveryUnlockButton.disabled = !d.fcm_registered || d.status !== 'LOCKED' || d.contract_status === 'ACTIVE';
+      recoveryUnlockButton.onclick = async () => {
+        if (!confirm('¿Enviar una orden de RECUPERACIÓN al equipo ' + (d.device_name || d.id) + '? Solo funciona si el estado del servidor es LOCKED y no existe contrato ACTIVE. No modifica el PIN, patrón ni contraseña de Android. Si Android no abre CREDIXCEL automáticamente, puede ser necesario tocar la notificación de CREDIXCEL.')) return;
+        recoveryUnlockButton.disabled = true;
+        try {
+          const result = await api('/api/admin/devices/' + encodeURIComponent(d.id) + '/recover-unlock', { method: 'POST', body: '{}' });
+          alert(result.message + '\nID de orden: ' + result.commandId);
+        } catch(e) {
+          alert(e.message);
+        } finally {
+          await loadDevices();
+        }
+      };
+
       const controlNote = document.createElement('p');
       controlNote.textContent = 'Las órdenes no cambian el estado por sí solas. El servidor espera confirmación autenticada del equipo. Android puede requerir tocar la notificación para abrir la pantalla CREDIXCEL.';
       card.append(
@@ -257,6 +273,7 @@ async function loadDevices() {
         actionsTitle,
         lockButton,
         unlockButton,
+        recoveryUnlockButton,
         controlNote,
         imeiTitle,
         imeiNote,
