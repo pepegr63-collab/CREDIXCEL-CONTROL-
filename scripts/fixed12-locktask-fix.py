@@ -293,5 +293,34 @@ if "catch (_: IllegalArgumentException)" not in d:
     if marker not in d:
         raise SystemExit("Could not find configureKiosk exception block")
     d = d.replace(marker, replacement, 1)
+
+# Verify that Android actually removed the package from the Lock Task allowlist.
+old_clear = '''            manager.setLockTaskPackages(admin(context), emptyArray<String>())
+            true
+        } catch (_: SecurityException) {
+            false
+        } catch (_: IllegalStateException) {
+            false
+        }
+    }
+
+    fun applyUninstallPolicy'''
+new_clear = '''            manager.setLockTaskPackages(admin(context), emptyArray<String>())
+            !manager.isLockTaskPermitted(context.packageName)
+        } catch (_: SecurityException) {
+            false
+        } catch (_: IllegalStateException) {
+            false
+        } catch (_: IllegalArgumentException) {
+            false
+        }
+    }
+
+    fun applyUninstallPolicy'''
+if old_clear in d:
+    d = d.replace(old_clear, new_clear, 1)
+elif "!manager.isLockTaskPermitted(context.packageName)" not in d:
+    raise SystemExit("Could not find clearKioskConfiguration block to harden")
+
 device_path.write_text(d, encoding="utf-8")
 print("Delayed Lock Task verification patch applied.")
