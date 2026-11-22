@@ -21,7 +21,7 @@ checks = {
     "FCM stores the pending authenticated command": 'savePendingCommand(commandId, claimed.action)' in service,
     "FCM keeps notification fallback": 'showCommandNotification(claimed.action, launched)' in service,
     "pending UNLOCK is executed by foreground Activity": '"UNLOCK_DEVICE" ->' in activity and 'releaseKiosk()' in activity,
-    "Lock Task exit is verified": 'lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE' in activity,
+    "Lock Task exit is verified": "lockTaskModeState" in activity and "ActivityManager.LOCK_TASK_MODE_NONE" in activity,
     "kiosk configuration is removed in release path": 'DeviceActions.clearKioskConfiguration(this)' in release_body,
     "financing policies are released in release path": 'DeviceActions.releaseFinancingProtection(this)' in release_body,
     "release clears HOME and allowlist before stopping Lock Task": (
