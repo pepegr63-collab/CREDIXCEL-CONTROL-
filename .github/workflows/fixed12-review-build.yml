@@ -334,3 +334,4 @@ jobs:
           name: CREDIXCEL-fixed12-background-lock-fix-release-1.2.9
           path: ${{ runner.temp }}/credixcel-source/**/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+# Trigger build for background lock review
