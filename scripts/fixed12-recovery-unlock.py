@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK."""
+"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK, release 1.3.0."""
 from pathlib import Path
 import re
 import sys
