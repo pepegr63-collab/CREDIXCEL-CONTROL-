@@ -69,9 +69,9 @@ jobs:
           gradle_file = root / "android/app/build.gradle.kts"
           text = gradle_file.read_text()
 
-          # The installed 1.2.6 is versionCode 27. This managed-screen review release is 1.2.7 / 28.
-          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>28', text)
-          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.7"', text)
+          # The installed 1.2.7 is versionCode 28. This Lock Task correction review release is 1.2.8 / 29.
+          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>29', text)
+          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.8"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
 
@@ -317,12 +317,12 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='28' versionName='1\.2\.7'"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='29' versionName='1\.2\.8'"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-fixed12-managed-screen-release-1.2.7
+          name: CREDIXCEL-fixed12-locktask-fix-release-1.2.8
           path: ${{ runner.temp }}/credixcel-source/**/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
