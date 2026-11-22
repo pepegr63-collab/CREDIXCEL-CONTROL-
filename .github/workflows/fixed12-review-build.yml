@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - fixed12-fcm-review
+      - fixed12-locktask-fix
     paths:
       - 'CREDIXCEL-Control-fixed11-fcm-patch.zip'
       - '.github/workflows/fixed12-review-build.yml'
@@ -262,6 +263,26 @@ jobs:
           p.write_text(source, encoding="utf-8")
           PY
           python3 "$RUNNER_TEMP/fixed12-managed-screen.py" "$PROJECT_DIR"
+
+      - name: Export generated Android source for lock-task review
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/credixcel-locktask-source"
+          mkdir -p "$OUT"
+          cp "$RUNNER_TEMP/fixed12-managed-screen.py" "$OUT/"
+          cp -R "$PROJECT_DIR/android/app/src/main" "$OUT/"
+          cp "$PROJECT_DIR/android/app/build.gradle.kts" "$OUT/"
+          tar -czf "$RUNNER_TEMP/credixcel-locktask-source.tar.gz" -C "$OUT" .
+
+      - name: Upload generated Android source for lock-task review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CREDIXCEL-locktask-source-review
+          path: ${{ runner.temp }}/credixcel-locktask-source.tar.gz
+          if-no-files-found: warn
 
       - name: Validate backend syntax
         run: node --check "$PROJECT_DIR/server/src/server.js"
