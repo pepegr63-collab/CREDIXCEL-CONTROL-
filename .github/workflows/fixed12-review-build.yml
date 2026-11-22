@@ -10,6 +10,7 @@ on:
       - 'CREDIXCEL-Control-fixed11-fcm-patch.zip'
       - '.github/workflows/fixed12-review-build.yml'
       - 'scripts/fixed12-managed-screen.py.gz.b64'
+      - 'scripts/fixed12-locktask-fix.py'
 
 permissions:
   contents: read
@@ -263,6 +264,12 @@ jobs:
           p.write_text(source, encoding="utf-8")
           PY
           python3 "$RUNNER_TEMP/fixed12-managed-screen.py" "$PROJECT_DIR"
+
+      - name: Apply delayed Lock Task verification fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/fixed12-locktask-fix.py "$PROJECT_DIR"
 
       - name: Export generated Android source for lock-task review
         if: success()
