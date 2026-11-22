@@ -450,6 +450,49 @@ app.post('/api/admin/devices/:id/unlock', admin, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+app.post('/api/admin/devices/:id/recover-unlock', admin, async (req, res, next) => {
+  try {
+    if (!firebaseMessaging) return res.status(503).json({ error: 'Firebase Cloud Messaging no está configurado en el servidor.' });
+    const found = await pool.query('SELECT id, status, fcm_token FROM devices WHERE id=$1', [req.params.id]);
+    const device = found.rows[0];
+    if (!device) return res.status(404).json({ error: 'Equipo no encontrado.' });
+    if (device.status !== 'LOCKED') return res.status(409).json({ error: 'La recuperación solo está permitida para un equipo cuyo estado confirmado sea LOCKED.' });
+    if (!device.fcm_token) return res.status(409).json({ error: 'El equipo no tiene un token FCM registrado.' });
+
+    // Emergency recovery may bypass the ACTIVE-contract rule, but only for a confirmed LOCKED device.
+    const contract = await pool.query('SELECT status FROM contracts WHERE device_id=$1 ORDER BY created_at DESC LIMIT 1', [device.id]);
+    if (contract.rowCount && contract.rows[0].status === 'ACTIVE') {
+      return res.status(409).json({ error: 'El contrato está ACTIVE. Utiliza la liberación normal.' });
+    }
+    const pending = await pool.query(
+      `SELECT id FROM device_commands WHERE device_id=$1 AND action='UNLOCK_DEVICE'
+       AND status IN ('SENT','PROCESSING') ORDER BY created_at DESC LIMIT 1`,
+      [device.id]
+    );
+    if (pending.rowCount) return res.status(409).json({ error: 'Ya existe una orden UNLOCK pendiente para este equipo.' });
+
+    const commandId = id();
+    await pool.query(
+      "INSERT INTO device_commands(id,device_id,action,status,created_at,sent_at) VALUES($1,$2,'UNLOCK_DEVICE','SENT',$3,$3)",
+      [commandId, device.id, now()]
+    );
+    try {
+      await firebaseMessaging.send({
+        token: device.fcm_token,
+        data: { commandId, deviceId: device.id, action: 'UNLOCK_DEVICE', recovery: 'true' },
+        android: { priority: 'high' }
+      });
+      await audit('DEVICE_UNLOCK_RECOVERY_COMMAND_SENT', 'device', device.id, commandId + '; no ACTIVE contract');
+      res.json({ queued: true, commandId, message: 'Orden de recuperación enviada. El estado solo será ACTIVE después de confirmar autenticadamente la salida de Lock Task.' });
+    } catch (sendError) {
+      await pool.query("UPDATE device_commands SET status='FAILED', completed_at=$1, result=$2 WHERE id=$3",
+        [now(), String(sendError.message).slice(0, 500), commandId]);
+      await audit('DEVICE_UNLOCK_RECOVERY_SEND_FAILED', 'device', device.id, String(sendError.message).slice(0, 300));
+      res.status(502).json({ error: 'No se pudo enviar la orden de recuperación por FCM.' });
+    }
+  } catch (e) { next(e); }
+});
+
 app.post('/api/admin/devices/:id/ping', admin, async (req, res, next) => {
   try {
     if (!firebaseMessaging) {
