@@ -189,6 +189,89 @@ if old_activate in s:
     s = s.replace(old_activate, new_activate, 1)
 elif "private suspend fun activateKiosk(): String" not in s:
     raise SystemExit("Could not find activateKiosk implementation")
+
+# Correct the release ordering for devices where the DPC is also persistent HOME.
+# Remove the HOME preference and Lock Task allowlist first. Android then exits
+# Lock Task for every task belonging to the package; stopLockTask is a fallback.
+if "private var releaseInProgress = false" not in s:
+    field = "    private var lockTaskEntryInProgress = false\n"
+    if field not in s:
+        raise SystemExit("Missing lockTaskEntryInProgress field for release guard")
+    s = s.replace(field, field + "    private var releaseInProgress = false\n", 1)
+
+s = s.replace(
+    "else if (prefs.protectionActive) enterManagedLockTask()",
+    "else if (prefs.protectionActive && !releaseInProgress) enterManagedLockTask()",
+    1
+)
+
+release_start = s.index("    private fun releaseKiosk(): String {")
+release_end = s.index("\n    @Composable", release_start)
+release = '''    private suspend fun releaseKiosk(): String {
+        if (!DeviceActions.isDeviceOwner(this)) {
+            return "UNLOCK_REJECTED_NOT_DEVICE_OWNER"
+        }
+
+        releaseInProgress = true
+        try {
+            // Important: this app is both the kiosk package and persistent HOME.
+            // Remove HOME + the package allowlist before asking the current Activity
+            // to stop Lock Task, otherwise the second HOME task can keep mode=LOCKED.
+            val kioskCleared = DeviceActions.clearKioskConfiguration(this)
+            if (!kioskCleared || DeviceActions.isLockTaskPermitted(this)) {
+                prefs.protectionActive = true
+                lockScreenVisible = true
+                return "UNLOCK_FAILED_KIOSK_CONFIGURATION_NOT_CLEARED"
+            }
+
+            runCatching {
+                val manager = getSystemService(ActivityManager::class.java)
+                if (manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE) {
+                    stopLockTask()
+                }
+            }
+
+            var lockTaskStopped = false
+            for (attempt in 0 until 40) {
+                if (getSystemService(ActivityManager::class.java).lockTaskModeState ==
+                    ActivityManager.LOCK_TASK_MODE_NONE) {
+                    lockTaskStopped = true
+                    break
+                }
+                delay(100)
+            }
+
+            if (!lockTaskStopped) {
+                // Restore the kiosk policy if Android did not confirm exit.
+                DeviceActions.configureKiosk(this)
+                DeviceActions.applyFinancingProtection(this)
+                prefs.protectionActive = true
+                lockScreenVisible = true
+                startLockTaskAndWait()
+                return "UNLOCK_FAILED_LOCK_TASK_STILL_ACTIVE"
+            }
+
+            val policiesReleased = DeviceActions.releaseFinancingProtection(this)
+            if (!policiesReleased) {
+                // A partial policy release is not reported as success.
+                DeviceActions.configureKiosk(this)
+                DeviceActions.applyFinancingProtection(this)
+                prefs.protectionActive = true
+                lockScreenVisible = true
+                startLockTaskAndWait()
+                return "UNLOCK_FAILED_FINANCING_POLICIES_NOT_CLEARED"
+            }
+
+            prefs.protectionActive = false
+            lockScreenVisible = false
+            return "UNLOCK_SUCCESS_LOCK_TASK_EXITED_AND_POLICIES_CLEARED"
+        } finally {
+            releaseInProgress = false
+        }
+    }
+'''
+s = s[:release_start] + release + s[release_end:]
+
 main_path.write_text(s, encoding="utf-8")
 
 d = device_path.read_text(encoding="utf-8")
