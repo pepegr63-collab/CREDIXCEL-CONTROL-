@@ -11,6 +11,7 @@ on:
       - '.github/workflows/fixed12-review-build.yml'
       - 'scripts/fixed12-managed-screen.py.gz.b64'
       - 'scripts/fixed12-locktask-fix.py'
+      - 'scripts/fixed12-background-lock.py'
 
 permissions:
   contents: read
@@ -271,6 +272,12 @@ jobs:
           set -euo pipefail
           python3 scripts/fixed12-locktask-fix.py "$PROJECT_DIR"
 
+      - name: Apply best-effort background command launch fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/fixed12-background-lock.py "$PROJECT_DIR"
+
       - name: Export generated Android source for lock-task review
         if: success()
         shell: bash
@@ -323,6 +330,6 @@ jobs:
       - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-fixed12-locktask-fix-release-1.2.8
+          name: CREDIXCEL-fixed12-background-lock-fix-release-1.2.9
           path: ${{ runner.temp }}/credixcel-source/**/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
