@@ -7,12 +7,14 @@ on:
       - fixed12-fcm-review
       - fixed12-locktask-fix
       - fixed12-background-lock-fix
+      - recovery-unlock-1.3.0
     paths:
       - 'CREDIXCEL-Control-fixed11-fcm-patch.zip'
       - '.github/workflows/fixed12-review-build.yml'
       - 'scripts/fixed12-managed-screen.py.gz.b64'
       - 'scripts/fixed12-locktask-fix.py'
       - 'scripts/fixed12-background-lock.py'
+      - 'scripts/fixed12-recovery-unlock.py'
 
 permissions:
   contents: read
@@ -71,9 +73,9 @@ jobs:
           gradle_file = root / "android/app/build.gradle.kts"
           text = gradle_file.read_text()
 
-          # The installed 1.2.8 is versionCode 29. This background Lock Task review release is 1.2.9 / 30.
-          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>30', text)
-          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.2.9"', text)
+          # The installed 1.2.8 is versionCode 29. This recovery UNLOCK review release is 1.3.0 / 31.
+          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>31', text)
+          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.3.0"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
 
@@ -279,6 +281,12 @@ jobs:
           set -euo pipefail
           python3 scripts/fixed12-background-lock.py "$PROJECT_DIR"
 
+      - name: Verify authenticated recovery UNLOCK path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/fixed12-recovery-unlock.py "$PROJECT_DIR"
+
       - name: Export generated Android source for lock-task review
         if: success()
         shell: bash
@@ -325,13 +333,13 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='30' versionName='1\.2\.9'"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\.credixcel\.control' versionCode='31' versionName='1\.3\.0'"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-fixed12-background-lock-fix-release-1.2.9
+          name: CREDIXCEL-recovery-unlock-release-1.3.0
           path: ${{ runner.temp }}/credixcel-source/**/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 # Trigger build for background lock review
