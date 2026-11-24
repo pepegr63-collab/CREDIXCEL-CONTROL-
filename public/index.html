@@ -417,7 +417,7 @@ async function loadContractOptions() {
       option.disabled = d.contract_status === 'ACTIVE';
       deviceSelect.append(option);
     });
-    clients.forEach(c => {
+    clients.filter(c => !c.duplicate_of).forEach(c => {
       const option = document.createElement('option');
       option.value = c.id;
       option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
