@@ -500,8 +500,8 @@ async function createClient() {
         method: 'PUT',
         body: JSON.stringify(body)
       });
-      document.getElementById('clientFormMessage').textContent = 'Cliente actualizado: ' + result.id;
       cancelClientEdit();
+      document.getElementById('clientFormMessage').textContent = 'Cliente actualizado: ' + result.id;
     } else {
       if (!clientCreateRequestKey) clientCreateRequestKey = crypto.randomUUID();
       button.textContent = 'Registrando...';
