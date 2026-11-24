@@ -57,8 +57,26 @@
 
     <section>
       <h2>Clientes</h2>
+      <input id="clientName" placeholder="Nombre del cliente">
+      <input id="clientPhone" placeholder="Teléfono (opcional)">
+      <input id="clientEmail" type="email" placeholder="Correo (opcional)">
+      <button onclick="createClient()">Registrar cliente</button>
       <button onclick="loadClients()">Consultar clientes</button>
       <pre id="clients"></pre>
+    </section>
+
+    <section>
+      <h2>Asignar contrato activo a un equipo</h2>
+      <p>El equipo debe tener un contrato ACTIVE asociado para permitir una liberación remota.</p>
+      <label for="contractClient">Cliente</label><br>
+      <select id="contractClient"></select><br>
+      <label for="contractDevice">Equipo enrolado</label><br>
+      <select id="contractDevice"></select><br>
+      <input id="contractTotal" type="number" min="0" step="0.01" placeholder="Monto total">
+      <input id="contractMonthly" type="number" min="0" step="0.01" placeholder="Pago mensual">
+      <input id="contractDueDay" type="number" min="1" max="31" value="1" placeholder="Día de pago">
+      <button onclick="createContract()">Crear y asignar contrato ACTIVE</button>
+      <pre id="contractMessage"></pre>
     </section>
 
     <section>
@@ -102,6 +120,8 @@ async function login() {
     msg.textContent = '';
     await loadDashboard();
     await loadDevices();
+    await loadClients();
+    await loadContractOptions();
   } catch(e) { msg.textContent = e.message; msg.className = 'error'; }
 }
 async function loadDashboard() {
@@ -231,7 +251,7 @@ async function loadDevices() {
 
       const unlockButton = document.createElement('button');
       unlockButton.textContent = 'Enviar liberación CREDIXCEL';
-      unlockButton.disabled = !d.fcm_registered || d.status !== 'LOCKED' || d.contract_status !== 'ACTIVE';
+      unlockButton.disabled = !d.fcm_registered || !d.unlock_ready || d.contract_status !== 'ACTIVE';
       unlockButton.onclick = async () => {
         if (!confirm('Enviar UNLOCK al equipo ' + (d.device_name || d.id) + '? Solo se liberará la pantalla administrativa CREDIXCEL; no se modifica ni elimina el PIN, patrón o contraseña de Android.')) return;
         unlockButton.disabled = true;
@@ -249,7 +269,13 @@ async function loadDevices() {
       };
 
       const controlNote = document.createElement('p');
-      controlNote.textContent = 'Las órdenes no cambian el estado por sí solas. El servidor espera confirmación autenticada del equipo. Android puede requerir tocar la notificación para abrir la pantalla CREDIXCEL.';
+      controlNote.textContent = !d.fcm_registered
+        ? 'Control remoto no disponible: el equipo aún no registra token FCM.'
+        : d.contract_status !== 'ACTIVE'
+          ? 'Liberación deshabilitada: falta un contrato ACTIVE asociado a este equipo.'
+          : !d.unlock_ready
+            ? 'Liberación deshabilitada: se requiere un bloqueo remoto ejecutado y confirmado por el equipo.'
+            : 'Bloqueo confirmado y contrato ACTIVE. La liberación se habilitará mientras se mantengan estas condiciones. El estado solo cambia tras el ACK autenticado del equipo.';
       card.append(
         title,
         info,
@@ -276,6 +302,111 @@ async function loadDevices() {
     });
   } catch(e) {
     alert(e.message);
+  }
+}
+async function loadClients() {
+  try {
+    const rows = await api('/api/admin/clients');
+    document.getElementById('clients').textContent = rows.length
+      ? rows.map(c => c.name + (c.phone ? ' · ' + c.phone : '') + ' · ID: ' + c.id).join('\\n')
+      : 'No hay clientes registrados.';
+    const select = document.getElementById('contractClient');
+    if (select) {
+      select.replaceChildren();
+      rows.forEach(c => {
+        const option = document.createElement('option');
+        option.value = c.id;
+        option.textContent = c.name;
+        select.append(option);
+      });
+    }
+  } catch(e) {
+    document.getElementById('clients').textContent = e.message;
+  }
+}
+async function loadContractOptions() {
+  try {
+    const [clients, devices] = await Promise.all([
+      api('/api/admin/clients'),
+      api('/api/admin/devices')
+    ]);
+    const clientSelect = document.getElementById('contractClient');
+    const deviceSelect = document.getElementById('contractDevice');
+    clientSelect.replaceChildren();
+    devices.filter(d => d.device_token).forEach(d => {
+      const option = document.createElement('option');
+      option.value = d.id;
+      option.textContent = (d.device_name || 'Equipo') + ' · ' + d.status +
+        (d.contract_id ? ' · Contrato existente' : ' · Sin contrato');
+      option.disabled = Boolean(d.contract_id);
+      deviceSelect.append(option);
+    });
+    clients.forEach(c => {
+      const option = document.createElement('option');
+      option.value = c.id;
+      option.textContent = c.name;
+      clientSelect.append(option);
+    });
+    if (!devices.some(d => d.device_token && !d.contract_id)) {
+      document.getElementById('contractMessage').textContent =
+        'No hay equipos enrolados disponibles sin contrato asociado.';
+    }
+  } catch(e) {
+    document.getElementById('contractMessage').textContent = e.message;
+  }
+}
+async function createClient() {
+  const name = document.getElementById('clientName').value.trim();
+  if (!name) {
+    alert('Escribe el nombre del cliente.');
+    return;
+  }
+  try {
+    await api('/api/admin/clients', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        phone: document.getElementById('clientPhone').value.trim(),
+        email: document.getElementById('clientEmail').value.trim()
+      })
+    });
+    document.getElementById('clientName').value = '';
+    document.getElementById('clientPhone').value = '';
+    document.getElementById('clientEmail').value = '';
+    await loadClients();
+    document.getElementById('contractMessage').textContent = 'Cliente registrado. Ya puedes asignarle un contrato.';
+  } catch(e) {
+    alert(e.message);
+  }
+}
+async function createContract() {
+  const clientId = document.getElementById('contractClient').value;
+  const deviceId = document.getElementById('contractDevice').value;
+  if (!clientId || !deviceId) {
+    alert('Selecciona un cliente y un equipo enrolado.');
+    return;
+  }
+  const totalAmount = Number(document.getElementById('contractTotal').value || 0);
+  const monthlyAmount = Number(document.getElementById('contractMonthly').value || 0);
+  const dueDay = Number(document.getElementById('contractDueDay').value || 1);
+  if (!Number.isFinite(totalAmount) || totalAmount < 0 ||
+      !Number.isFinite(monthlyAmount) || monthlyAmount < 0 ||
+      !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
+    alert('Revisa los montos y el día de pago.');
+    return;
+  }
+  try {
+    await api('/api/admin/contracts', {
+      method: 'POST',
+      body: JSON.stringify({ clientId, deviceId, totalAmount, monthlyAmount, dueDay })
+    });
+    document.getElementById('contractMessage').textContent =
+      'Contrato ACTIVE creado y asociado. Actualiza la lista de equipos para verificarlo.';
+    await loadClients();
+    await loadContractOptions();
+    await loadDevices();
+  } catch(e) {
+    document.getElementById('contractMessage').textContent = e.message;
   }
 }
 async function loadAudit() {
