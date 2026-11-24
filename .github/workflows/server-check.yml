@@ -35,7 +35,7 @@ jobs:
           from pathlib import Path
           import re
           html = Path('public/index.html').read_text(encoding='utf-8')
-          scripts = re.findall(r'<script>([\\s\\S]*?)</script>', html)
+          scripts = re.findall(r'<script>([\s\S]*?)</script>', html)
           if len(scripts) != 1:
               raise SystemExit(f'Expected one inline script, found {len(scripts)}')
           Path('/tmp/credixcel-admin.js').write_text(scripts[0], encoding='utf-8')
