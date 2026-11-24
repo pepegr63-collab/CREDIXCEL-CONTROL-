@@ -71,7 +71,7 @@
       <select id="duplicateClientSelect"></select><br>
       <label for="duplicateTargetSelect">Cliente principal que se conservará</label><br>
       <select id="duplicateTargetSelect"></select><br>
-      <button onclick="markClientDuplicate()">Marcar como duplicado</button>
+      <button id="markDuplicateButton" onclick="markClientDuplicate()" disabled>Marcar como duplicado</button>
       <p id="duplicateClientMessage" aria-live="polite"></p>
     </section>
 
@@ -108,6 +108,7 @@ let token = '';
 let clientCreateRequestKey = null;
 let clientCreateInFlight = false;
 let editingClientId = null;
+let activeClientRows = [];
 async function api(url, options={}) {
   const response = await fetch(url, {
     ...options,
@@ -371,28 +372,79 @@ async function loadClients() {
       });
     }
 
-    const duplicateSelect = document.getElementById('duplicateClientSelect');
-    const targetSelect = document.getElementById('duplicateTargetSelect');
-    if (duplicateSelect && targetSelect) {
-      duplicateSelect.replaceChildren();
-      targetSelect.replaceChildren();
-      rows.filter(c => !c.duplicate_of).forEach(c => {
-        const option = document.createElement('option');
-        option.value = c.id;
-        option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
-        duplicateSelect.append(option);
-      });
-      activeClients.forEach(c => {
-        const option = document.createElement('option');
-        option.value = c.id;
-        option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
-        targetSelect.append(option);
-      });
-    }
+    activeClientRows = activeClients;
+    updateDuplicateClientControls();
   } catch(e) {
     document.getElementById('clients').textContent = e.message;
   }
 }
+function updateDuplicateClientControls() {
+  const duplicateSelect = document.getElementById('duplicateClientSelect');
+  const targetSelect = document.getElementById('duplicateTargetSelect');
+  const markButton = document.getElementById('markDuplicateButton');
+  const message = document.getElementById('duplicateClientMessage');
+  if (!duplicateSelect || !targetSelect || !markButton) return;
+
+  const previousDuplicate = duplicateSelect.value;
+  const previousTarget = targetSelect.value;
+  duplicateSelect.replaceChildren();
+  targetSelect.replaceChildren();
+
+  const addPlaceholder = (select, label) => {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = label;
+    select.append(option);
+  };
+  const addClientOptions = (select, excludedId = '') => {
+    activeClientRows.filter(c => c.id !== excludedId).forEach(c => {
+      const option = document.createElement('option');
+      option.value = c.id;
+      option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
+      select.append(option);
+    });
+  };
+
+  if (activeClientRows.length < 2) {
+    addPlaceholder(duplicateSelect, 'No hay clientes duplicados pendientes');
+    addPlaceholder(targetSelect, activeClientRows.length
+      ? activeClientRows[0].name + ' es el único cliente principal disponible'
+      : 'No hay clientes principales disponibles');
+    if (activeClientRows.length === 1) {
+      const onlyClient = activeClientRows[0];
+      const option = document.createElement('option');
+      option.value = onlyClient.id;
+      option.textContent = onlyClient.name + ' · ID: ' + String(onlyClient.id).slice(0, 8);
+      targetSelect.append(option);
+    }
+    duplicateSelect.disabled = true;
+    targetSelect.disabled = true;
+    markButton.disabled = true;
+    message.textContent = 'No hay clientes duplicados pendientes. Se necesitan al menos dos clientes activos.';
+    return;
+  }
+
+  addPlaceholder(duplicateSelect, 'Selecciona el cliente duplicado');
+  addPlaceholder(targetSelect, 'Selecciona el cliente principal');
+  addClientOptions(duplicateSelect, previousTarget);
+  addClientOptions(targetSelect, previousDuplicate);
+
+  if (previousDuplicate && [...duplicateSelect.options].some(o => o.value === previousDuplicate)) {
+    duplicateSelect.value = previousDuplicate;
+  }
+  if (previousTarget && [...targetSelect.options].some(o => o.value === previousTarget)) {
+    targetSelect.value = previousTarget;
+  }
+
+  duplicateSelect.onchange = updateDuplicateClientControls;
+  targetSelect.onchange = updateDuplicateClientControls;
+  duplicateSelect.disabled = false;
+  targetSelect.disabled = false;
+  markButton.disabled = !duplicateSelect.value || !targetSelect.value ||
+    duplicateSelect.value === targetSelect.value;
+  message.textContent = '';
+}
+
 async function loadContractOptions() {
   try {
     const [clients, devices] = await Promise.all([
@@ -456,6 +508,10 @@ async function markClientDuplicate() {
   const duplicateId = document.getElementById('duplicateClientSelect').value;
   const primaryId = document.getElementById('duplicateTargetSelect').value;
   const message = document.getElementById('duplicateClientMessage');
+  if (activeClientRows.length < 2) {
+    message.textContent = 'No hay clientes duplicados pendientes.';
+    return;
+  }
   if (!duplicateId || !primaryId || duplicateId === primaryId) {
     message.textContent = 'Selecciona dos clientes diferentes.';
     return;
