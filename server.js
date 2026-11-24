@@ -487,6 +487,18 @@ app.post('/api/admin/devices/:id/unlock', admin, async (req, res, next) => {
       return res.status(409).json({ error: 'No existe un bloqueo remoto confirmado vigente para este equipo.' });
     }
 
+    const pendingCommand = await pool.query(
+      `SELECT id FROM device_commands
+       WHERE device_id=$1
+         AND action IN ('LOCK_DEVICE','UNLOCK_DEVICE')
+         AND status IN ('SENT','PROCESSING')
+       LIMIT 1`,
+      [device.id]
+    );
+    if (pendingCommand.rowCount) {
+      return res.status(409).json({ error: 'Ya existe una orden de bloqueo o liberación pendiente para este equipo.' });
+    }
+
     const commandId = id();
     await pool.query(
       "INSERT INTO device_commands(id,device_id,action,status,created_at,sent_at) VALUES($1,$2,'UNLOCK_DEVICE','SENT',$3,$3)",
