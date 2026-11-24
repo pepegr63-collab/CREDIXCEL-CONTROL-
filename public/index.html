@@ -60,9 +60,15 @@
       <input id="clientName" placeholder="Nombre del cliente">
       <input id="clientPhone" placeholder="Teléfono (opcional)">
       <input id="clientEmail" type="email" placeholder="Correo (opcional)">
-      <button onclick="createClient()">Registrar cliente</button>
+      <button id="createClientButton" onclick="createClient()">Registrar cliente</button>
       <button onclick="loadClients()">Consultar clientes</button>
       <pre id="clients"></pre>
+    </section>
+
+    <section>
+      <h2>Contratos registrados</h2>
+      <button onclick="loadContracts()">Consultar contratos</button>
+      <pre id="contracts" aria-live="polite"></pre>
     </section>
 
     <section>
@@ -89,6 +95,8 @@
 </main>
 <script>
 let token = '';
+let clientCreateRequestKey = null;
+let clientCreateInFlight = false;
 async function api(url, options={}) {
   const response = await fetch(url, {
     ...options,
@@ -122,6 +130,7 @@ async function login() {
     await loadDevices();
     await loadClients();
     await loadContractOptions();
+    await loadContracts();
   } catch(e) { msg.textContent = e.message; msg.className = 'error'; }
 }
 async function loadDashboard() {
@@ -160,7 +169,10 @@ async function loadDevices() {
       title.textContent = d.device_name || 'Equipo sin enrolar';
 
       const info = document.createElement('p');
-      info.textContent = `Estado: ${d.status} · Firebase: ${d.fcm_registered ? 'Token registrado' : 'Pendiente'} · Cliente: ${d.client_name || 'Sin asignar'} · Código: ${d.enrollment_code}`;
+      const clientLabel = d.client_name
+        ? d.client_name + ' (ID: ' + String(d.client_id || '').slice(0, 8) + ')'
+        : 'Sin asignar';
+      info.textContent = `Estado: ${d.status} · Firebase: ${d.fcm_registered ? 'Token registrado' : 'Pendiente'} · Cliente: ${clientLabel} · Código: ${d.enrollment_code}`;
 
       const pingButton = document.createElement('button');
       pingButton.textContent = 'Probar conexión FCM (PING)';
@@ -317,7 +329,7 @@ async function loadClients() {
       rows.forEach(c => {
         const option = document.createElement('option');
         option.value = c.id;
-        option.textContent = c.name;
+        option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
         select.append(option);
       });
     }
@@ -352,7 +364,7 @@ async function loadContractOptions() {
     clients.forEach(c => {
       const option = document.createElement('option');
       option.value = c.id;
-      option.textContent = c.name;
+      option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
       clientSelect.append(option);
     });
     if (!devices.some(d => d.device_token && d.contract_status !== 'ACTIVE')) {
@@ -364,29 +376,70 @@ async function loadContractOptions() {
   }
 }
 async function createClient() {
+  if (clientCreateInFlight) return;
+
   const name = document.getElementById('clientName').value.trim();
   if (!name) {
     alert('Escribe el nombre del cliente.');
     return;
   }
+
+  const button = document.getElementById('createClientButton');
+  clientCreateInFlight = true;
+  if (!clientCreateRequestKey) clientCreateRequestKey = crypto.randomUUID();
+  button.disabled = true;
+  button.textContent = 'Registrando...';
+
   try {
-    await api('/api/admin/clients', {
+    const result = await api('/api/admin/clients', {
       method: 'POST',
+      headers: { 'Idempotency-Key': clientCreateRequestKey },
       body: JSON.stringify({
         name,
         phone: document.getElementById('clientPhone').value.trim(),
         email: document.getElementById('clientEmail').value.trim()
       })
     });
+
+    clientCreateRequestKey = null;
     document.getElementById('clientName').value = '';
     document.getElementById('clientPhone').value = '';
     document.getElementById('clientEmail').value = '';
     await loadClients();
-    document.getElementById('contractMessage').textContent = 'Cliente registrado. Ya puedes asignarle un contrato.';
+    await loadContractOptions();
+    document.getElementById('contractMessage').textContent =
+      (result.duplicate ? 'La solicitud repetida fue reconocida; no se creó otro cliente. ' : 'Cliente registrado. ') +
+      'ID: ' + result.id + '. Ya puedes asignarle un contrato.';
   } catch(e) {
+    // Keep the same key so a retry after a network timeout cannot create a second row.
     alert(e.message);
+  } finally {
+    clientCreateInFlight = false;
+    button.disabled = false;
+    button.textContent = 'Registrar cliente';
   }
 }
+async function loadContracts() {
+  const root = document.getElementById('contracts');
+  root.textContent = 'Consultando contratos...';
+  try {
+    const rows = await api('/api/admin/contracts');
+    root.textContent = rows.length
+      ? rows.map(c => [
+          'Contrato: ' + c.id,
+          'Estado: ' + c.status,
+          'Cliente: ' + c.client_name + ' · ID: ' + c.client_id,
+          'Equipo: ' + (c.device_name || 'Sin equipo') +
+            (c.enrollment_code ? ' · Código: ' + c.enrollment_code : ''),
+          'Monto total: ' + Number(c.total_amount || 0).toFixed(2),
+          'Pago mensual: ' + Number(c.monthly_amount || 0).toFixed(2)
+        ].join('\\n')).join('\\n\\n')
+      : 'No hay contratos registrados.';
+  } catch(e) {
+    root.textContent = 'No se pudieron consultar los contratos: ' + e.message;
+  }
+}
+
 async function createContract() {
   const clientId = document.getElementById('contractClient').value;
   const deviceId = document.getElementById('contractDevice').value;
@@ -413,6 +466,7 @@ async function createContract() {
     await loadClients();
     await loadContractOptions();
     await loadDevices();
+    await loadContracts();
   } catch(e) {
     document.getElementById('contractMessage').textContent = e.message;
   }
