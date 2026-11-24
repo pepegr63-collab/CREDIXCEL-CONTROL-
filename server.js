@@ -71,8 +71,9 @@ async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS clients (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT,
-      email TEXT, created_at TEXT NOT NULL
+      email TEXT, created_at TEXT NOT NULL, duplicate_of TEXT
     );
+    ALTER TABLE clients ADD COLUMN IF NOT EXISTS duplicate_of TEXT;
     CREATE TABLE IF NOT EXISTS contracts (
       id TEXT PRIMARY KEY, client_id TEXT NOT NULL, device_id TEXT,
       total_amount DOUBLE PRECISION DEFAULT 0,
@@ -311,7 +312,7 @@ app.get('/api/admin/dashboard', admin, async (req, res, next) => {
   try {
     const q = await pool.query(`
       SELECT
-        (SELECT COUNT(*) FROM clients) AS clients,
+        (SELECT COUNT(*) FROM clients WHERE duplicate_of IS NULL) AS clients,
         (SELECT COUNT(*) FROM devices) AS devices,
         (SELECT COUNT(*) FROM devices WHERE status='ACTIVE') AS active,
         (SELECT COUNT(*) FROM devices WHERE status='PAYMENT_DUE') AS due,
@@ -591,8 +592,15 @@ app.post('/api/admin/devices/:id/uninstall-policy', admin, async (req, res, next
 });
 
 app.get('/api/admin/clients', admin, async (req, res, next) => {
-  try { res.json((await pool.query('SELECT * FROM clients ORDER BY created_at DESC')).rows); }
-  catch (e) { next(e); }
+  try {
+    const result = await pool.query(`
+      SELECT c.*, target.name AS duplicate_of_name
+      FROM clients c
+      LEFT JOIN clients target ON target.id = c.duplicate_of
+      ORDER BY c.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (e) { next(e); }
 });
 
 app.post('/api/admin/clients', admin, async (req, res, next) => {
@@ -654,6 +662,104 @@ app.post('/api/admin/clients', admin, async (req, res, next) => {
   }
 });
 
+app.put('/api/admin/clients/:id', admin, async (req, res, next) => {
+  const clientId = String(req.params.id || '').trim();
+  const name = String(req.body?.name || '').trim();
+  const phone = String(req.body?.phone || '').trim();
+  const email = String(req.body?.email || '').trim();
+  if (!name) return res.status(400).json({ error: 'El nombre del cliente es obligatorio.' });
+
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    const existing = await db.query(
+      'SELECT id, duplicate_of FROM clients WHERE id=$1 FOR UPDATE',
+      [clientId]
+    );
+    if (!existing.rowCount) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ error: 'Cliente no encontrado.' });
+    }
+    if (existing.rows[0].duplicate_of) {
+      await db.query('ROLLBACK');
+      return res.status(409).json({ error: 'Este registro está marcado como duplicado. Edita el cliente principal.' });
+    }
+    await db.query(
+      'UPDATE clients SET name=$1, phone=$2, email=$3 WHERE id=$4',
+      [name, phone, email, clientId]
+    );
+    await db.query(
+      'INSERT INTO audit(id,action,entity,entity_id,details,created_at) VALUES($1,$2,$3,$4,$5,$6)',
+      [id(), 'CLIENT_UPDATED', 'client', clientId, name, now()]
+    );
+    await db.query('COMMIT');
+    res.json({ updated: true, id: clientId });
+  } catch (e) {
+    await db.query('ROLLBACK').catch(() => {});
+    next(e);
+  } finally {
+    db.release();
+  }
+});
+
+app.post('/api/admin/clients/:id/mark-duplicate', admin, async (req, res, next) => {
+  const duplicateId = String(req.params.id || '').trim();
+  const primaryId = String(req.body?.primaryClientId || '').trim();
+  if (!primaryId || duplicateId === primaryId) {
+    return res.status(400).json({ error: 'Selecciona otro cliente como registro principal.' });
+  }
+
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    const rows = await db.query(
+      'SELECT id, duplicate_of FROM clients WHERE id = ANY($1::text[]) FOR UPDATE',
+      [[duplicateId, primaryId]]
+    );
+    const duplicate = rows.rows.find(row => row.id === duplicateId);
+    const primary = rows.rows.find(row => row.id === primaryId);
+    if (!duplicate || !primary) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ error: 'No se encontró uno de los clientes seleccionados.' });
+    }
+    if (duplicate.duplicate_of) {
+      await db.query('ROLLBACK');
+      return res.status(409).json({ error: 'Este cliente ya está marcado como duplicado.' });
+    }
+    if (primary.duplicate_of) {
+      await db.query('ROLLBACK');
+      return res.status(409).json({ error: 'El cliente principal seleccionado también está marcado como duplicado.' });
+    }
+
+    const [contracts, requests] = await Promise.all([
+      db.query('SELECT id FROM contracts WHERE client_id=$1 LIMIT 1', [duplicateId]),
+      db.query('SELECT request_key FROM client_creation_requests WHERE client_id=$1 LIMIT 1', [duplicateId])
+    ]);
+    if (contracts.rowCount || requests.rowCount) {
+      await db.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'No se puede marcar: el cliente tiene contratos o solicitudes de registro asociados.'
+      });
+    }
+
+    await db.query(
+      'UPDATE clients SET duplicate_of=$1 WHERE id=$2',
+      [primaryId, duplicateId]
+    );
+    await db.query(
+      'INSERT INTO audit(id,action,entity,entity_id,details,created_at) VALUES($1,$2,$3,$4,$5,$6)',
+      [id(), 'CLIENT_MARKED_DUPLICATE', 'client', duplicateId, 'Duplicado de cliente ' + primaryId, now()]
+    );
+    await db.query('COMMIT');
+    res.json({ marked: true, duplicateId, primaryClientId: primaryId });
+  } catch (e) {
+    await db.query('ROLLBACK').catch(() => {});
+    next(e);
+  } finally {
+    db.release();
+  }
+});
+
 app.get('/api/admin/contracts', admin, async (req, res, next) => {
   try {
     res.json((await pool.query(`
@@ -673,8 +779,11 @@ app.post('/api/admin/contracts', admin, async (req, res, next) => {
         !Number.isInteger(Number(dueDay)) || Number(dueDay) < 1 || Number(dueDay) > 31) {
       return res.status(400).json({ error: 'Montos o día de pago inválidos.' });
     }
-    const clientExists = await pool.query('SELECT id FROM clients WHERE id=$1', [clientId]);
+    const clientExists = await pool.query('SELECT id, duplicate_of FROM clients WHERE id=$1', [clientId]);
     if (!clientExists.rowCount) return res.status(404).json({ error: 'Cliente no encontrado.' });
+    if (clientExists.rows[0].duplicate_of) {
+      return res.status(409).json({ error: 'No se pueden crear contratos para un registro marcado como duplicado.' });
+    }
     if (deviceId) {
       const deviceExists = await pool.query(
         'SELECT id FROM devices WHERE id=$1 AND device_token IS NOT NULL',

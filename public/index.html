@@ -61,8 +61,18 @@
       <input id="clientPhone" placeholder="Teléfono (opcional)">
       <input id="clientEmail" type="email" placeholder="Correo (opcional)">
       <button id="createClientButton" onclick="createClient()">Registrar cliente</button>
+      <button id="cancelClientEditButton" class="hidden" onclick="cancelClientEdit()">Cancelar edición</button>
       <button onclick="loadClients()">Consultar clientes</button>
-      <pre id="clients"></pre>
+      <p id="clientFormMessage" aria-live="polite"></p>
+      <div id="clients" aria-live="polite"></div>
+      <h3>Marcar registro duplicado</h3>
+      <p>El registro duplicado se conserva para mantener su historial de auditoría y deja de aparecer al crear contratos.</p>
+      <label for="duplicateClientSelect">Cliente duplicado</label><br>
+      <select id="duplicateClientSelect"></select><br>
+      <label for="duplicateTargetSelect">Cliente principal que se conservará</label><br>
+      <select id="duplicateTargetSelect"></select><br>
+      <button onclick="markClientDuplicate()">Marcar como duplicado</button>
+      <p id="duplicateClientMessage" aria-live="polite"></p>
     </section>
 
     <section>
@@ -97,6 +107,7 @@
 let token = '';
 let clientCreateRequestKey = null;
 let clientCreateInFlight = false;
+let editingClientId = null;
 async function api(url, options={}) {
   const response = await fetch(url, {
     ...options,
@@ -320,17 +331,62 @@ async function loadDevices() {
 async function loadClients() {
   try {
     const rows = await api('/api/admin/clients');
-    document.getElementById('clients').textContent = rows.length
-      ? rows.map(c => c.name + (c.phone ? ' · ' + c.phone : '') + ' · ID: ' + c.id).join('\\n')
-      : 'No hay clientes registrados.';
-    const select = document.getElementById('contractClient');
-    if (select) {
-      select.replaceChildren();
+    const root = document.getElementById('clients');
+    root.replaceChildren();
+    if (!rows.length) {
+      root.textContent = 'No hay clientes registrados.';
+    } else {
       rows.forEach(c => {
+        const row = document.createElement('div');
+        row.style.padding = '10px 0';
+        row.style.borderBottom = '1px solid #e2e8f0';
+        const info = document.createElement('p');
+        info.textContent = c.name + (c.phone ? ' · ' + c.phone : '') +
+          (c.email ? ' · ' + c.email : '') + ' · ID: ' + c.id +
+          (c.duplicate_of ? ' · DUPLICADO DE: ' + (c.duplicate_of_name || c.duplicate_of) : '');
+        row.append(info);
+        if (!c.duplicate_of) {
+          const edit = document.createElement('button');
+          edit.textContent = 'Editar cliente';
+          edit.onclick = () => beginClientEdit(c);
+          row.append(edit);
+        } else {
+          const note = document.createElement('small');
+          note.textContent = 'Registro histórico; no se puede editar ni asignar a contratos.';
+          row.append(note);
+        }
+        root.append(row);
+      });
+    }
+
+    const activeClients = rows.filter(c => !c.duplicate_of);
+    const contractSelect = document.getElementById('contractClient');
+    if (contractSelect) {
+      contractSelect.replaceChildren();
+      activeClients.forEach(c => {
         const option = document.createElement('option');
         option.value = c.id;
         option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
-        select.append(option);
+        contractSelect.append(option);
+      });
+    }
+
+    const duplicateSelect = document.getElementById('duplicateClientSelect');
+    const targetSelect = document.getElementById('duplicateTargetSelect');
+    if (duplicateSelect && targetSelect) {
+      duplicateSelect.replaceChildren();
+      targetSelect.replaceChildren();
+      rows.filter(c => !c.duplicate_of).forEach(c => {
+        const option = document.createElement('option');
+        option.value = c.id;
+        option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
+        duplicateSelect.append(option);
+      });
+      activeClients.forEach(c => {
+        const option = document.createElement('option');
+        option.value = c.id;
+        option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
+        targetSelect.append(option);
       });
     }
   } catch(e) {
@@ -361,7 +417,7 @@ async function loadContractOptions() {
       option.disabled = d.contract_status === 'ACTIVE';
       deviceSelect.append(option);
     });
-    clients.forEach(c => {
+    clients.filter(c => !c.duplicate_of).forEach(c => {
       const option = document.createElement('option');
       option.value = c.id;
       option.textContent = c.name + ' · ID: ' + String(c.id).slice(0, 8);
@@ -375,6 +431,50 @@ async function loadContractOptions() {
     document.getElementById('contractMessage').textContent = e.message;
   }
 }
+function beginClientEdit(client) {
+  editingClientId = client.id;
+  document.getElementById('clientName').value = client.name || '';
+  document.getElementById('clientPhone').value = client.phone || '';
+  document.getElementById('clientEmail').value = client.email || '';
+  document.getElementById('createClientButton').textContent = 'Guardar cambios';
+  document.getElementById('cancelClientEditButton').classList.remove('hidden');
+  document.getElementById('clientFormMessage').textContent = 'Editando cliente ' + client.id;
+  document.getElementById('clientName').focus();
+}
+
+function cancelClientEdit() {
+  editingClientId = null;
+  document.getElementById('clientName').value = '';
+  document.getElementById('clientPhone').value = '';
+  document.getElementById('clientEmail').value = '';
+  document.getElementById('createClientButton').textContent = 'Registrar cliente';
+  document.getElementById('cancelClientEditButton').classList.add('hidden');
+  document.getElementById('clientFormMessage').textContent = '';
+}
+
+async function markClientDuplicate() {
+  const duplicateId = document.getElementById('duplicateClientSelect').value;
+  const primaryId = document.getElementById('duplicateTargetSelect').value;
+  const message = document.getElementById('duplicateClientMessage');
+  if (!duplicateId || !primaryId || duplicateId === primaryId) {
+    message.textContent = 'Selecciona dos clientes diferentes.';
+    return;
+  }
+  if (!confirm('Marcar el primer cliente como duplicado del segundo. Se conservará su auditoría y no se borrará ningún registro. ¿Continuar?')) return;
+  try {
+    await api('/api/admin/clients/' + encodeURIComponent(duplicateId) + '/mark-duplicate', {
+      method: 'POST',
+      body: JSON.stringify({ primaryClientId: primaryId })
+    });
+    message.textContent = 'Registro marcado como duplicado. El historial se conservó.';
+    await loadClients();
+    await loadContractOptions();
+    await loadDashboard();
+  } catch(e) {
+    message.textContent = e.message;
+  }
+}
+
 async function createClient() {
   if (clientCreateInFlight) return;
 
@@ -386,37 +486,47 @@ async function createClient() {
 
   const button = document.getElementById('createClientButton');
   clientCreateInFlight = true;
-  if (!clientCreateRequestKey) clientCreateRequestKey = crypto.randomUUID();
   button.disabled = true;
-  button.textContent = 'Registrando...';
+  const body = {
+    name,
+    phone: document.getElementById('clientPhone').value.trim(),
+    email: document.getElementById('clientEmail').value.trim()
+  };
 
   try {
-    const result = await api('/api/admin/clients', {
-      method: 'POST',
-      headers: { 'Idempotency-Key': clientCreateRequestKey },
-      body: JSON.stringify({
-        name,
-        phone: document.getElementById('clientPhone').value.trim(),
-        email: document.getElementById('clientEmail').value.trim()
-      })
-    });
-
-    clientCreateRequestKey = null;
-    document.getElementById('clientName').value = '';
-    document.getElementById('clientPhone').value = '';
-    document.getElementById('clientEmail').value = '';
+    if (editingClientId) {
+      button.textContent = 'Guardando...';
+      const result = await api('/api/admin/clients/' + encodeURIComponent(editingClientId), {
+        method: 'PUT',
+        body: JSON.stringify(body)
+      });
+      cancelClientEdit();
+      document.getElementById('clientFormMessage').textContent = 'Cliente actualizado: ' + result.id;
+    } else {
+      if (!clientCreateRequestKey) clientCreateRequestKey = crypto.randomUUID();
+      button.textContent = 'Registrando...';
+      const result = await api('/api/admin/clients', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': clientCreateRequestKey },
+        body: JSON.stringify(body)
+      });
+      clientCreateRequestKey = null;
+      document.getElementById('clientName').value = '';
+      document.getElementById('clientPhone').value = '';
+      document.getElementById('clientEmail').value = '';
+      document.getElementById('clientFormMessage').textContent =
+        (result.duplicate ? 'Solicitud repetida reconocida. ' : 'Cliente registrado. ') +
+        'ID: ' + result.id;
+    }
     await loadClients();
     await loadContractOptions();
-    document.getElementById('contractMessage').textContent =
-      (result.duplicate ? 'La solicitud repetida fue reconocida; no se creó otro cliente. ' : 'Cliente registrado. ') +
-      'ID: ' + result.id + '. Ya puedes asignarle un contrato.';
+    await loadContracts();
   } catch(e) {
-    // Keep the same key so a retry after a network timeout cannot create a second row.
     alert(e.message);
   } finally {
     clientCreateInFlight = false;
     button.disabled = false;
-    button.textContent = 'Registrar cliente';
+    button.textContent = editingClientId ? 'Guardar cambios' : 'Registrar cliente';
   }
 }
 async function loadContracts() {
