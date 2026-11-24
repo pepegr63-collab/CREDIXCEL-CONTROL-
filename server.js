@@ -312,7 +312,7 @@ app.get('/api/admin/dashboard', admin, async (req, res, next) => {
   try {
     const q = await pool.query(`
       SELECT
-        (SELECT COUNT(*) FROM clients) AS clients,
+        (SELECT COUNT(*) FROM clients WHERE duplicate_of IS NULL) AS clients,
         (SELECT COUNT(*) FROM devices) AS devices,
         (SELECT COUNT(*) FROM devices WHERE status='ACTIVE') AS active,
         (SELECT COUNT(*) FROM devices WHERE status='PAYMENT_DUE') AS due,
