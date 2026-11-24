@@ -235,6 +235,29 @@ app.post('/api/device/commands/ack', async (req, res, next) => {
       [finalStatus, now(), safeResult, commandId]
     );
 
+    if (ok && command.rows[0].action === 'UNLOCK_DEVICE') {
+      // Revalidate the contract at execution time, not only when the admin queued the command.
+      const activeContract = await pool.query(
+        "SELECT id FROM contracts WHERE device_id=$1 AND status='ACTIVE' ORDER BY created_at DESC, id DESC LIMIT 1",
+        [deviceId]
+      );
+      const currentDevice = await pool.query(
+        'SELECT status FROM devices WHERE id=$1',
+        [deviceId]
+      );
+      if (!activeContract.rowCount || !currentDevice.rowCount || currentDevice.rows[0].status !== 'LOCKED') {
+        const reason = !activeContract.rowCount
+          ? 'Contrato ya no está ACTIVE; liberación rechazada.'
+          : 'El dispositivo ya no está confirmado como LOCKED; liberación rechazada.';
+        await pool.query(
+          "UPDATE device_commands SET status='FAILED', completed_at=$1, result=$2 WHERE id=$3",
+          [now(), reason, commandId]
+        );
+        await audit('DEVICE_UNLOCK_REJECTED', 'device', deviceId, reason);
+        return res.status(409).json({ error: reason });
+      }
+    }
+
     if (ok && command.rows[0].action === 'LOCK_DEVICE') {
       await pool.query(
         "UPDATE devices SET status='LOCKED', message='Pantalla administrativa CREDIXCEL confirmada por el dispositivo', updated_at=$1 WHERE id=$2",
@@ -262,7 +285,12 @@ app.post('/api/device/sync', async (req, res, next) => {
     const { deviceId, deviceToken } = req.body || {};
     const result = await pool.query(
       `SELECT d.*, c.status AS contract_status
-       FROM devices d LEFT JOIN contracts c ON c.device_id=d.id
+       FROM devices d
+       LEFT JOIN LATERAL (
+         SELECT status FROM contracts
+         WHERE device_id=d.id
+         ORDER BY created_at DESC, id DESC LIMIT 1
+       ) c ON TRUE
        WHERE d.id=$1 AND d.device_token=$2`,
       [deviceId, deviceToken]
     );
@@ -294,9 +322,28 @@ app.get('/api/admin/devices', admin, async (req, res, next) => {
     const r = await pool.query(`
       SELECT d.*, (d.fcm_token IS NOT NULL AND d.fcm_token <> '') AS fcm_registered,
       c.name AS client_name, c.id AS client_id,
-      ct.id AS contract_id, ct.status AS contract_status
-      FROM devices d LEFT JOIN contracts ct ON ct.device_id=d.id
-      LEFT JOIN clients c ON c.id=ct.client_id ORDER BY d.updated_at DESC
+      ct.id AS contract_id, ct.status AS contract_status,
+      (
+        d.status='LOCKED' AND (
+          SELECT cmd.action
+          FROM device_commands cmd
+          WHERE cmd.device_id=d.id
+            AND cmd.action IN ('LOCK_DEVICE','UNLOCK_DEVICE')
+            AND cmd.status='EXECUTED'
+          ORDER BY cmd.created_at DESC, cmd.id DESC
+          LIMIT 1
+        )='LOCK_DEVICE'
+      ) AS unlock_ready
+      FROM devices d
+      LEFT JOIN LATERAL (
+        SELECT id, client_id, status
+        FROM contracts
+        WHERE device_id=d.id
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      ) ct ON TRUE
+      LEFT JOIN clients c ON c.id=ct.client_id
+      ORDER BY d.updated_at DESC
     `);
     res.json(r.rows);
   } catch (e) { next(e); }
@@ -419,11 +466,25 @@ app.post('/api/admin/devices/:id/unlock', admin, async (req, res, next) => {
     }
 
     const contract = await pool.query(
-      'SELECT status FROM contracts WHERE device_id=$1 ORDER BY created_at DESC LIMIT 1',
+      "SELECT id FROM contracts WHERE device_id=$1 AND status='ACTIVE' ORDER BY created_at DESC, id DESC LIMIT 1",
       [device.id]
     );
-    if (!contract.rowCount || contract.rows[0].status !== 'ACTIVE') {
-      return res.status(409).json({ error: 'La liberación requiere un contrato ACTIVE.' });
+    if (!contract.rowCount) {
+      return res.status(409).json({ error: 'La liberación requiere un contrato ACTIVE asociado a este equipo.' });
+    }
+
+    const lastConfirmedAction = await pool.query(
+      `SELECT action
+       FROM device_commands
+       WHERE device_id=$1
+         AND action IN ('LOCK_DEVICE','UNLOCK_DEVICE')
+         AND status='EXECUTED'
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [device.id]
+    );
+    if (!lastConfirmedAction.rowCount || lastConfirmedAction.rows[0].action !== 'LOCK_DEVICE') {
+      return res.status(409).json({ error: 'No existe un bloqueo remoto confirmado vigente para este equipo.' });
     }
 
     const commandId = id();
@@ -541,6 +602,19 @@ app.post('/api/admin/contracts', admin, async (req, res, next) => {
   try {
     const { clientId, deviceId = null, totalAmount = 0, monthlyAmount = 0, dueDay = 1 } = req.body;
     if (!clientId) return res.status(400).json({ error: 'clientId required' });
+    const clientExists = await pool.query('SELECT id FROM clients WHERE id=$1', [clientId]);
+    if (!clientExists.rowCount) return res.status(404).json({ error: 'Cliente no encontrado.' });
+    if (deviceId) {
+      const deviceExists = await pool.query('SELECT id FROM devices WHERE id=$1', [deviceId]);
+      if (!deviceExists.rowCount) return res.status(404).json({ error: 'Equipo no encontrado.' });
+      const activeContract = await pool.query(
+        "SELECT id FROM contracts WHERE device_id=$1 AND status='ACTIVE' LIMIT 1",
+        [deviceId]
+      );
+      if (activeContract.rowCount) {
+        return res.status(409).json({ error: 'El equipo ya tiene un contrato ACTIVE asociado.' });
+      }
+    }
     const contractId = id();
     await pool.query(
       'INSERT INTO contracts(id,client_id,device_id,total_amount,monthly_amount,due_day,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
