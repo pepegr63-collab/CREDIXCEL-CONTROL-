@@ -408,7 +408,7 @@ function updateDuplicateClientControls() {
   if (activeClientRows.length < 2) {
     addPlaceholder(duplicateSelect, 'No hay clientes duplicados pendientes');
     addPlaceholder(targetSelect, activeClientRows.length
-      ? 'Elías es el único cliente principal disponible'
+      ? activeClientRows[0].name + ' es el único cliente principal disponible'
       : 'No hay clientes principales disponibles');
     if (activeClientRows.length === 1) {
       const onlyClient = activeClientRows[0];
@@ -420,7 +420,7 @@ function updateDuplicateClientControls() {
     duplicateSelect.disabled = true;
     targetSelect.disabled = true;
     markButton.disabled = true;
-    message.textContent = 'No hay clientes duplicados pendientes.';
+    message.textContent = 'No hay clientes duplicados pendientes. Se necesitan al menos dos clientes activos.';
     return;
   }
 
@@ -436,6 +436,8 @@ function updateDuplicateClientControls() {
     targetSelect.value = previousTarget;
   }
 
+  duplicateSelect.onchange = updateDuplicateClientControls;
+  targetSelect.onchange = updateDuplicateClientControls;
   duplicateSelect.disabled = false;
   targetSelect.disabled = false;
   markButton.disabled = !duplicateSelect.value || !targetSelect.value ||
