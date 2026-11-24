@@ -334,10 +334,17 @@ async function loadContractOptions() {
     const clientSelect = document.getElementById('contractClient');
     const deviceSelect = document.getElementById('contractDevice');
     clientSelect.replaceChildren();
-    devices.filter(d => d.device_token).forEach(d => {
+    deviceSelect.replaceChildren();
+
+    // Deduplicate by database ID so repeated refreshes never accumulate options.
+    const uniqueDevices = [...new Map(devices.map(d => [d.id, d])).values()];
+    uniqueDevices.filter(d => d.device_token).forEach(d => {
       const option = document.createElement('option');
       option.value = d.id;
-      option.textContent = (d.device_name || 'Equipo') + ' · ' + d.status +
+      const code = d.enrollment_code || 'sin código';
+      const shortId = String(d.id || '').slice(0, 8);
+      option.textContent = (d.device_name || 'Equipo') + ' · Código: ' + code +
+        ' · ' + d.status + ' · ID: ' + shortId +
         (d.contract_status === 'ACTIVE' ? ' · Contrato ACTIVE' : d.contract_id ? ' · Contrato anterior' : ' · Sin contrato');
       option.disabled = d.contract_status === 'ACTIVE';
       deviceSelect.append(option);
