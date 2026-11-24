@@ -300,6 +300,7 @@ async function loadDevices() {
 
       root.append(card);
     });
+    await loadContractOptions();
   } catch(e) {
     alert(e.message);
   }
@@ -337,8 +338,8 @@ async function loadContractOptions() {
       const option = document.createElement('option');
       option.value = d.id;
       option.textContent = (d.device_name || 'Equipo') + ' · ' + d.status +
-        (d.contract_id ? ' · Contrato existente' : ' · Sin contrato');
-      option.disabled = Boolean(d.contract_id);
+        (d.contract_status === 'ACTIVE' ? ' · Contrato ACTIVE' : d.contract_id ? ' · Contrato anterior' : ' · Sin contrato');
+      option.disabled = d.contract_status === 'ACTIVE';
       deviceSelect.append(option);
     });
     clients.forEach(c => {
@@ -347,7 +348,7 @@ async function loadContractOptions() {
       option.textContent = c.name;
       clientSelect.append(option);
     });
-    if (!devices.some(d => d.device_token && !d.contract_id)) {
+    if (!devices.some(d => d.device_token && d.contract_status !== 'ACTIVE')) {
       document.getElementById('contractMessage').textContent =
         'No hay equipos enrolados disponibles sin contrato asociado.';
     }
