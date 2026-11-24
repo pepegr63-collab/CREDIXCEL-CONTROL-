@@ -95,6 +95,12 @@ async function initDb() {
       id TEXT PRIMARY KEY, action TEXT NOT NULL, entity TEXT,
       entity_id TEXT, details TEXT, created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS client_creation_requests (
+      request_key TEXT PRIMARY KEY,
+      payload_hash TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   await pool.query(`
@@ -590,20 +596,68 @@ app.get('/api/admin/clients', admin, async (req, res, next) => {
 });
 
 app.post('/api/admin/clients', admin, async (req, res, next) => {
+  const requestKey = String(req.get('Idempotency-Key') || '').trim();
+  const name = String(req.body?.name || '').trim();
+  const phone = String(req.body?.phone || '').trim();
+  const email = String(req.body?.email || '').trim();
+
+  if (!name) return res.status(400).json({ error: 'Escribe el nombre del cliente.' });
+  if (!/^[a-zA-Z0-9-]{16,100}$/.test(requestKey)) {
+    return res.status(400).json({ error: 'Falta una clave válida para evitar registros duplicados. Actualiza el panel e inténtalo de nuevo.' });
+  }
+
+  const payloadHash = crypto.createHash('sha256')
+    .update(JSON.stringify({ name, phone, email }))
+    .digest('hex');
+  const db = await pool.connect();
+
   try {
-    const { name, phone = '', email = '' } = req.body;
-    if (!name) return res.status(400).json({ error: 'Name required' });
+    await db.query('BEGIN');
+    // Serialize concurrent retries that carry the same idempotency key.
+    await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [requestKey]);
+
+    const previous = await db.query(
+      'SELECT payload_hash, client_id FROM client_creation_requests WHERE request_key=$1',
+      [requestKey]
+    );
+
+    if (previous.rowCount) {
+      if (previous.rows[0].payload_hash !== payloadHash) {
+        await db.query('ROLLBACK');
+        return res.status(409).json({ error: 'Esta solicitud ya se usó con otros datos. Inicia un nuevo registro.' });
+      }
+      await db.query('COMMIT');
+      return res.json({ id: previous.rows[0].client_id, duplicate: true });
+    }
+
     const clientId = id();
-    await pool.query('INSERT INTO clients(id,name,phone,email,created_at) VALUES($1,$2,$3,$4,$5)', [clientId, name, phone, email, now()]);
-    await audit('CLIENT_CREATED', 'client', clientId, name);
-    res.json({ id: clientId });
-  } catch (e) { next(e); }
+    const createdAt = now();
+    await db.query(
+      'INSERT INTO clients(id,name,phone,email,created_at) VALUES($1,$2,$3,$4,$5)',
+      [clientId, name, phone, email, createdAt]
+    );
+    await db.query(
+      'INSERT INTO client_creation_requests(request_key,payload_hash,client_id,created_at) VALUES($1,$2,$3,$4)',
+      [requestKey, payloadHash, clientId, createdAt]
+    );
+    await db.query(
+      'INSERT INTO audit(id,action,entity,entity_id,details,created_at) VALUES($1,$2,$3,$4,$5,$6)',
+      [id(), 'CLIENT_CREATED', 'client', clientId, name, createdAt]
+    );
+    await db.query('COMMIT');
+    res.json({ id: clientId, duplicate: false });
+  } catch (e) {
+    await db.query('ROLLBACK').catch(() => {});
+    next(e);
+  } finally {
+    db.release();
+  }
 });
 
 app.get('/api/admin/contracts', admin, async (req, res, next) => {
   try {
     res.json((await pool.query(`
-      SELECT ct.*, c.name AS client_name, d.device_name
+      SELECT ct.*, c.name AS client_name, d.device_name, d.enrollment_code
       FROM contracts ct JOIN clients c ON c.id=ct.client_id
       LEFT JOIN devices d ON d.id=ct.device_id ORDER BY ct.created_at DESC
     `)).rows);
