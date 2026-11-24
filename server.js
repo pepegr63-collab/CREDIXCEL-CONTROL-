@@ -297,7 +297,7 @@ app.post('/api/device/sync', async (req, res, next) => {
     const row = result.rows[0];
     if (!row) return res.status(401).json({ error: 'Unauthorized device' });
     await pool.query('UPDATE devices SET updated_at=$1 WHERE id=$2', [now(), deviceId]);
-    res.json({ deviceId: row.id, status: row.status, message: row.message || '', uninstallBlocked: Boolean(row.uninstall_blocked), contractStatus: row.contract_status || 'ACTIVE', updatedAt: row.updated_at });
+    res.json({ deviceId: row.id, status: row.status, message: row.message || '', uninstallBlocked: Boolean(row.uninstall_blocked), contractStatus: row.contract_status || 'NONE', updatedAt: row.updated_at });
   } catch (e) { next(e); }
 });
 
@@ -614,11 +614,19 @@ app.post('/api/admin/contracts', admin, async (req, res, next) => {
   try {
     const { clientId, deviceId = null, totalAmount = 0, monthlyAmount = 0, dueDay = 1 } = req.body;
     if (!clientId) return res.status(400).json({ error: 'clientId required' });
+    if (!Number.isFinite(Number(totalAmount)) || Number(totalAmount) < 0 ||
+        !Number.isFinite(Number(monthlyAmount)) || Number(monthlyAmount) < 0 ||
+        !Number.isInteger(Number(dueDay)) || Number(dueDay) < 1 || Number(dueDay) > 31) {
+      return res.status(400).json({ error: 'Montos o día de pago inválidos.' });
+    }
     const clientExists = await pool.query('SELECT id FROM clients WHERE id=$1', [clientId]);
     if (!clientExists.rowCount) return res.status(404).json({ error: 'Cliente no encontrado.' });
     if (deviceId) {
-      const deviceExists = await pool.query('SELECT id FROM devices WHERE id=$1', [deviceId]);
-      if (!deviceExists.rowCount) return res.status(404).json({ error: 'Equipo no encontrado.' });
+      const deviceExists = await pool.query(
+        'SELECT id FROM devices WHERE id=$1 AND device_token IS NOT NULL',
+        [deviceId]
+      );
+      if (!deviceExists.rowCount) return res.status(404).json({ error: 'Equipo no encontrado o todavía no está enrolado.' });
       const activeContract = await pool.query(
         "SELECT id FROM contracts WHERE device_id=$1 AND status='ACTIVE' LIMIT 1",
         [deviceId]
