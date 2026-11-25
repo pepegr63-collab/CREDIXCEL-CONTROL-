@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK, release 1.3.1."""
+"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK, release 1.3.2."""
 from pathlib import Path
 import re
 import sys
@@ -39,8 +39,20 @@ checks = {
     "allowlist removal is verified against DevicePolicyManager": "!manager.isLockTaskPermitted(context.packageName)" in device,
     "ACK occurs after execution result": 'acknowledgeCommand(CommandAckRequest(id, deviceToken, commandId, success, result))' in activity,
     "notifications remain available in Lock Task": 'LOCK_TASK_FEATURE_NOTIFICATIONS' in device,
-    "release versionCode 32": bool(re.search(r'(?m)^\s*versionCode\s*=\s*32\s*$', gradle)),
-    "release versionName 1.3.1": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.1"\s*$', gradle)),
+    "UNLOCK returns HOME only after successful ACK": (
+        'if (acknowledged)' in activity
+        and 'if (action == "UNLOCK_DEVICE" && success)' in activity
+        and activity.find("if (acknowledged)") < activity.find("returnToSystemHome()")
+    ),
+    "HOME resolver excludes CREDIXCEL itself": (
+        "queryIntentActivities" in activity
+        and "it.activityInfo.packageName != packageName" in activity
+    ),
+    "HOME return launches external activity then finishes CREDIXCEL": (
+        "startActivity(homeIntent)" in activity and "finish()" in activity
+    ),
+    "release versionCode 33": bool(re.search(r'(?m)^\s*versionCode\s*=\s*32\s*$', gradle)),
+    "release versionName 1.3.2": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.1"\s*$', gradle)),
 }
 failed = [name for name, ok in checks.items() if not ok]
 for name, ok in checks.items():
