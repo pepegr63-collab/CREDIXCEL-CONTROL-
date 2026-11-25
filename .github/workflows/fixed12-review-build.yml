@@ -78,7 +78,7 @@ jobs:
 
           # The installed 1.3.1 is versionCode 32. This HOME-return recovery release is 1.3.2 / 33.
           text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>33', text)
-          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+, text)
+          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.3.2"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
 
