@@ -51,8 +51,8 @@ checks = {
     "HOME return launches external activity then finishes CREDIXCEL": (
         "startActivity(homeIntent)" in activity and "finish()" in activity
     ),
-    "release versionCode 33": bool(re.search(r'(?m)^\s*versionCode\s*=\s*32\s*$', gradle)),
-    "release versionName 1.3.2": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.1"\s*$', gradle)),
+    "release versionCode 33": bool(re.search(r'(?m)^\s*versionCode\s*=\s*33\s*$', gradle)),
+    "release versionName 1.3.2": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.2"\s*$', gradle)),
 }
 failed = [name for name, ok in checks.items() if not ok]
 for name, ok in checks.items():
