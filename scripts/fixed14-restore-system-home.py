@@ -33,8 +33,8 @@ replacement = '''    /**
                 homeIntent,
                 android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
             ).asSequence()
-                .map { it.activityInfo }
-                .filter { info ->
+                .filter { item ->
+                    val info = item.activityInfo
                     info.packageName != context.packageName &&
                         !info.name.endsWith(".ResolverActivity") &&
                         runCatching {
@@ -43,10 +43,11 @@ replacement = '''    /**
                         }.getOrDefault(false)
                 }
                 .sortedWith(
-                    compareByDescending<android.content.pm.ActivityInfo> { it.priority }
-                        .thenBy { it.packageName }
+                    compareByDescending<android.content.pm.ResolveInfo> { it.priority }
+                        .thenByDescending { it.isDefault }
+                        .thenBy { it.activityInfo.packageName }
                 )
-                .firstOrNull() ?: return false
+                .firstOrNull()?.activityInfo ?: return false
 
             val filter = IntentFilter(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
