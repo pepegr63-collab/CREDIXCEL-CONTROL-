@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK, release 1.3.3."""
+"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK, release 1.3.4."""
 from pathlib import Path
 import sys
 
@@ -51,8 +51,8 @@ checks = {
     "HOME return launches external activity then finishes CREDIXCEL": (
         "startActivity(homeIntent)" in activity and "finish()" in activity
     ),
-    "release versionCode 34": "versionCode = 34" in gradle_lines,
-    "release versionName 1.3.3": 'versionName = "1.3.3"' in gradle_lines,
+    "release versionCode 35": "versionCode = 35" in gradle_lines,
+    "release versionName 1.3.4": 'versionName = "1.3.4"' in gradle_lines,
 }
 failed = [name for name, ok in checks.items() if not ok]
 for name, ok in checks.items():
