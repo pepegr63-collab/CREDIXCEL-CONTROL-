@@ -117,12 +117,11 @@ helper = '''    private fun returnToSystemHome(): Boolean {
 main = main[:start] + helper + main[end:]
 main_path.write_text(main, encoding="utf-8")
 
+# The workflow's preceding release-version step already sets 1.3.4 / code 35.
+# Do not bump or require the pre-patch version here; this script only restores HOME.
 build = build_path.read_text(encoding="utf-8")
-if 'versionName = "1.3.3"' not in build or "versionCode = 34" not in build:
-    raise SystemExit("Expected exact 1.3.3 / versionCode 34 source before bump")
-build = build.replace("versionCode = 34", "versionCode = 35", 1)
-build = build.replace('versionName = "1.3.3"', 'versionName = "1.3.4"', 1)
-build_path.write_text(build, encoding="utf-8")
+if 'versionName = "1.3.4"' not in build or "versionCode = 35" not in build:
+    raise SystemExit("Expected workflow-prepared 1.3.4 / versionCode 35 source")
 
 checks = {
     "system launcher selected from installed system HOME activities": "FLAG_SYSTEM" in device and "queryIntentActivities" in device,
