@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK, release 1.3.2."""
+"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK, release 1.3.3."""
 from pathlib import Path
-import re
 import sys
 
 root = Path(sys.argv[1])
@@ -10,7 +9,7 @@ api = (base / "java/com/credixcel/control/network/Api.kt").read_text()
 service = (base / "java/com/credixcel/control/messaging/CredixcelMessagingService.kt").read_text()
 activity = (base / "java/com/credixcel/control/MainActivity.kt").read_text()
 device = (base / "java/com/credixcel/control/device/DeviceActions.kt").read_text()
-gradle = (root / "android/app/build.gradle.kts").read_text()
+gradle_lines = (root / "android/app/build.gradle.kts").read_text().splitlines()
 release_start = activity.index("private suspend fun releaseKiosk()")
 release_end = activity.index("\n    @Composable", release_start)
 release_body = activity[release_start:release_end]
@@ -52,34 +51,8 @@ checks = {
     "HOME return launches external activity then finishes CREDIXCEL": (
         "startActivity(homeIntent)" in activity and "finish()" in activity
     ),
-    "release versionCode 34": bool(re.search(r'(?m)^\s*versionCode\s*=\s*34\s*
-    "release versionName 1.3.3": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.3"\s*
-}
-failed = [name for name, ok in checks.items() if not ok]
-for name, ok in checks.items():
-    print(("PASS" if ok else "FAIL") + ": " + name)
-if failed:
-    raise SystemExit("Recovery UNLOCK static validation failed: " + ", ".join(failed))
-print("Authenticated recovery UNLOCK static validation passed.")
-, gradle)),
-    "release versionName 1.3.2": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.2"\s*$', gradle)),
-}
-failed = [name for name, ok in checks.items() if not ok]
-for name, ok in checks.items():
-    print(("PASS" if ok else "FAIL") + ": " + name)
-if failed:
-    raise SystemExit("Recovery UNLOCK static validation failed: " + ", ".join(failed))
-print("Authenticated recovery UNLOCK static validation passed.")
-, gradle)),
-}
-failed = [name for name, ok in checks.items() if not ok]
-for name, ok in checks.items():
-    print(("PASS" if ok else "FAIL") + ": " + name)
-if failed:
-    raise SystemExit("Recovery UNLOCK static validation failed: " + ", ".join(failed))
-print("Authenticated recovery UNLOCK static validation passed.")
-, gradle)),
-    "release versionName 1.3.2": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.2"\s*$', gradle)),
+    "release versionCode 34": "versionCode = 34" in gradle_lines,
+    "release versionName 1.3.3": 'versionName = "1.3.3"' in gradle_lines,
 }
 failed = [name for name, ok in checks.items() if not ok]
 for name, ok in checks.items():
