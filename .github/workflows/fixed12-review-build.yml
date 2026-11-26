@@ -20,6 +20,7 @@ on:
       - 'scripts/fixed12-recovery-unlock.py'
       - 'scripts/fixed13-strict-kiosk.py'
       - 'scripts/fixed12-return-home-after-unlock.py'
+      - 'scripts/fixed14-restore-system-home.py'
 
 permissions:
   contents: read
