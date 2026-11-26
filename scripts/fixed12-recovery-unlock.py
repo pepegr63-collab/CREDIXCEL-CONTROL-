@@ -38,7 +38,8 @@ checks = {
     "failed release preserves protection flag": "prefs.protectionActive = true" in release_body and "UNLOCK_FAILED" in release_body,
     "allowlist removal is verified against DevicePolicyManager": "!manager.isLockTaskPermitted(context.packageName)" in device,
     "ACK occurs after execution result": 'acknowledgeCommand(CommandAckRequest(id, deviceToken, commandId, success, result))' in activity,
-    "notifications remain available in Lock Task": 'LOCK_TASK_FEATURE_NOTIFICATIONS' in device,
+    "strict Lock Task flags disable optional system UI": "manager.setLockTaskFeatures(admin(context), 0)" in device,
+    "notification shade is disabled in Lock Task": "LOCK_TASK_FEATURE_NOTIFICATIONS" not in device,
     "UNLOCK returns HOME only after successful ACK": (
         'if (acknowledged)' in activity
         and 'if (action == "UNLOCK_DEVICE" && success)' in activity
@@ -51,7 +52,33 @@ checks = {
     "HOME return launches external activity then finishes CREDIXCEL": (
         "startActivity(homeIntent)" in activity and "finish()" in activity
     ),
-    "release versionCode 33": bool(re.search(r'(?m)^\s*versionCode\s*=\s*33\s*$', gradle)),
+    "release versionCode 34": bool(re.search(r'(?m)^\s*versionCode\s*=\s*34\s*
+    "release versionName 1.3.3": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.3"\s*
+}
+failed = [name for name, ok in checks.items() if not ok]
+for name, ok in checks.items():
+    print(("PASS" if ok else "FAIL") + ": " + name)
+if failed:
+    raise SystemExit("Recovery UNLOCK static validation failed: " + ", ".join(failed))
+print("Authenticated recovery UNLOCK static validation passed.")
+, gradle)),
+    "release versionName 1.3.2": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.2"\s*$', gradle)),
+}
+failed = [name for name, ok in checks.items() if not ok]
+for name, ok in checks.items():
+    print(("PASS" if ok else "FAIL") + ": " + name)
+if failed:
+    raise SystemExit("Recovery UNLOCK static validation failed: " + ", ".join(failed))
+print("Authenticated recovery UNLOCK static validation passed.")
+, gradle)),
+}
+failed = [name for name, ok in checks.items() if not ok]
+for name, ok in checks.items():
+    print(("PASS" if ok else "FAIL") + ": " + name)
+if failed:
+    raise SystemExit("Recovery UNLOCK static validation failed: " + ", ".join(failed))
+print("Authenticated recovery UNLOCK static validation passed.")
+, gradle)),
     "release versionName 1.3.2": bool(re.search(r'(?m)^\s*versionName\s*=\s*"1\.3\.2"\s*$', gradle)),
 }
 failed = [name for name, ok in checks.items() if not ok]
