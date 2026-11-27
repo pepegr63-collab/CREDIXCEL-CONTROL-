@@ -1,4 +1,4 @@
-name: CREDIXCEL strict kiosk 1.3.4 release build
+name: CREDIXCEL strict kiosk 1.3.5 release build
 
 on:
   workflow_dispatch:
@@ -79,9 +79,9 @@ jobs:
           gradle_file = root / "android/app/build.gradle.kts"
           text = gradle_file.read_text()
 
-          # 1.3.4 restores verified system HOME after authenticated UNLOCK; preserve package and signing identity.
+          # 1.3.5 restores verified system HOME after authenticated UNLOCK; preserve package and signing identity.
           text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>35', text)
-          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.3.4"', text)
+          text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.3.5"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
 
@@ -255,7 +255,7 @@ jobs:
                           "UNLOCK_DEFERRED_ACTIVITY_SYNC_UNVERIFIED"'''
           service.write_text(kotlin[:start] + replacement + kotlin[end:])
 
-          print("CREDIXCEL strict kiosk release: versionName=1.3.4, versionCode=35; verified system HOME after UNLOCK.")
+          print("CREDIXCEL strict kiosk release: versionName=1.3.5, versionCode=36; verified system HOME after UNLOCK.")
           PY
 
       - name: Apply CREDIXCEL managed administrative screen
@@ -305,7 +305,7 @@ jobs:
           set -euo pipefail
           python3 scripts/fixed12-recovery-unlock.py "$PROJECT_DIR"
 
-      - name: Restore verified Android system HOME (1.3.4)
+      - name: Restore verified Android system HOME (1.3.5)
         shell: bash
         run: |
           set -euo pipefail
@@ -357,13 +357,13 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\\.credixcel\\.control' versionCode='35' versionName='1\\.3\\.4'"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\\.credixcel\\.control' versionCode='36' versionName='1\\.3\\.4'"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CREDIXCEL-strict-kiosk-release-1.3.4
+          name: CREDIXCEL-strict-kiosk-release-1.3.5
           path: ${{ runner.temp }}/credixcel-source/**/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 # Trigger build for background lock review
