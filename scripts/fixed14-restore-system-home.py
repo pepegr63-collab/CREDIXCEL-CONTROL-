@@ -139,7 +139,7 @@ main_path.write_text(main, encoding="utf-8")
 # Do not bump or require the pre-patch version here; this script only restores HOME.
 build = build_path.read_text(encoding="utf-8")
 if 'versionName = "1.3.5"' not in build or "versionCode = 36" not in build:
-    raise SystemExit("Expected workflow-prepared 1.3.4 / versionCode 35 source")
+    raise SystemExit("Expected workflow-prepared 1.3.5 / versionCode 36 source")
 
 checks = {
     "system launcher selected from installed system HOME activities": "FLAG_SYSTEM" in device and "queryIntentActivities" in device,
@@ -147,7 +147,7 @@ checks = {
     "HOME resolution verified after reassignment": "resolved.packageName == launcher.packageName" in device and "resolved.packageName != context.packageName" in device,
     "Lock Task allowlist cleared": "setLockTaskPackages(admin(context), emptyArray<String>())" in device,
     "MainActivity selects explicit installed system HOME": "queryIntentActivities(" in main and "FLAG_SYSTEM" in main and "component = android.content.ComponentName(launcher.packageName, launcher.name)" in main,
-    "version 1.3.5 / code 36": 'versionName = "1.3.4"' in build and "versionCode = 35" in build,
+    "version 1.3.5 / code 36": 'versionName = "1.3.5"' in build and "versionCode = 36" in build,
 }
 for label, ok in checks.items():
     print(("OK: " if ok else "ERROR: ") + label)
