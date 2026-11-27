@@ -94,21 +94,39 @@ helper = '''    private fun returnToSystemHome(): Boolean {
             addCategory(Intent.CATEGORY_HOME)
             addCategory(Intent.CATEGORY_DEFAULT)
         }
-        val resolved = packageManager.resolveActivity(
+
+        // Android 15 may resolve HOME to Settings.FallbackHome even when the
+        // real system launcher is installed. Select and start the launcher explicitly.
+        val launcher = packageManager.queryIntentActivities(
             homeIntent,
             android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
-        )?.activityInfo ?: return false
+        ).asSequence()
+            .filter { item ->
+                val info = item.activityInfo
+                info.packageName != packageName &&
+                    !info.name.endsWith(".ResolverActivity") &&
+                    runCatching {
+                        val app = packageManager.getApplicationInfo(info.packageName, 0)
+                        (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+                    }.getOrDefault(false)
+            }
+            .sortedWith(
+                compareByDescending<android.content.pm.ResolveInfo> { it.priority }
+                    .thenByDescending { it.isDefault }
+                    .thenBy { it.activityInfo.packageName }
+            )
+            .firstOrNull()?.activityInfo ?: return false
 
-        // Never accept CREDIXCEL itself or Android's chooser as the system HOME.
-        if (resolved.packageName == packageName ||
-            resolved.name.endsWith(".ResolverActivity")) return false
-
-        homeIntent.component = android.content.ComponentName(resolved.packageName, resolved.name)
-        homeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        val explicitHome = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            addCategory(Intent.CATEGORY_DEFAULT)
+            component = android.content.ComponentName(launcher.packageName, launcher.name)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        }
 
         return runCatching {
             getSystemService(android.app.NotificationManager::class.java).cancel(1207)
-            startActivity(homeIntent)
+            startActivity(explicitHome)
             finish()
             true
         }.getOrDefault(false)
@@ -120,7 +138,7 @@ main_path.write_text(main, encoding="utf-8")
 # The workflow's preceding release-version step already sets 1.3.4 / code 35.
 # Do not bump or require the pre-patch version here; this script only restores HOME.
 build = build_path.read_text(encoding="utf-8")
-if 'versionName = "1.3.4"' not in build or "versionCode = 35" not in build:
+if 'versionName = "1.3.5"' not in build or "versionCode = 36" not in build:
     raise SystemExit("Expected workflow-prepared 1.3.4 / versionCode 35 source")
 
 checks = {
@@ -128,11 +146,11 @@ checks = {
     "persistent HOME reassigned to external launcher": "addPersistentPreferredActivity(" in device and "ComponentName(launcher.packageName, launcher.name)" in device,
     "HOME resolution verified after reassignment": "resolved.packageName == launcher.packageName" in device and "resolved.packageName != context.packageName" in device,
     "Lock Task allowlist cleared": "setLockTaskPackages(admin(context), emptyArray<String>())" in device,
-    "MainActivity refuses self/Resolver HOME": 'resolved.packageName == packageName' in main and 'resolved.name.endsWith(".ResolverActivity")' in main,
-    "version 1.3.4 / code 35": 'versionName = "1.3.4"' in build and "versionCode = 35" in build,
+    "MainActivity selects explicit installed system HOME": "queryIntentActivities(" in main and "FLAG_SYSTEM" in main and "component = android.content.ComponentName(launcher.packageName, launcher.name)" in main,
+    "version 1.3.5 / code 36": 'versionName = "1.3.4"' in build and "versionCode = 35" in build,
 }
 for label, ok in checks.items():
     print(("OK: " if ok else "ERROR: ") + label)
 if not all(checks.values()):
     raise SystemExit("Post-patch validation failed")
-print("CREDIXCEL 1.3.4 HOME restoration patch applied.")
+print("CREDIXCEL 1.3.5 explicit system HOME patch applied.")
