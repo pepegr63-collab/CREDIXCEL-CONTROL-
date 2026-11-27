@@ -300,17 +300,17 @@ jobs:
           set -euo pipefail
           python3 scripts/fixed13-strict-kiosk.py "$PROJECT_DIR"
 
-      - name: Verify authenticated recovery UNLOCK path
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 scripts/fixed12-recovery-unlock.py "$PROJECT_DIR"
-
       - name: Restore verified Android system HOME (1.3.5)
         shell: bash
         run: |
           set -euo pipefail
           python3 scripts/fixed14-restore-system-home.py "$PROJECT_DIR"
+
+      - name: Verify authenticated recovery UNLOCK path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/fixed12-recovery-unlock.py "$PROJECT_DIR"
 
       - name: Export generated Android source for lock-task review
         if: success()
@@ -358,7 +358,7 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\\.credixcel\\.control' versionCode='36' versionName='1\\.3\\.4'"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\\.credixcel\\.control' versionCode='36' versionName='1\\.3\\.5'"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload signed APK artifact
