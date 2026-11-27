@@ -11,6 +11,7 @@ on:
       - recovery-unlock-1.3.1-exit-order
       - fix/1.3.2-return-home-after-unlock
       - fix/1.3.3-strict-kiosk-locktask
+      - fix/1.3.5-explicit-system-home
     paths:
       - 'CREDIXCEL-Control-fixed11-fcm-patch.zip'
       - '.github/workflows/fixed12-review-build.yml'
@@ -80,7 +81,7 @@ jobs:
           text = gradle_file.read_text()
 
           # 1.3.5 restores verified system HOME after authenticated UNLOCK; preserve package and signing identity.
-          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>35', text)
+          text, code_count = re.subn(r'(?m)^(\s*versionCode\s*=\s*)\d+', r'\g<1>36', text)
           text, name_count = re.subn(r'(?m)^(\s*versionName\s*=\s*).+$', r'\g<1>"1.3.5"', text)
           if code_count != 1 or name_count != 1:
               raise SystemExit(f"No se pudo fijar versionCode/versionName de forma inequívoca: code={code_count}, name={name_count}")
