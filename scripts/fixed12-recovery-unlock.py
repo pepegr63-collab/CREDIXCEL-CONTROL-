@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK, release 1.3.4."""
+"""Static safety gate for CREDIXCEL authenticated recovery UNLOCK, release 1.3.5."""
 from pathlib import Path
 import sys
 
@@ -44,15 +44,18 @@ checks = {
         and 'if (action == "UNLOCK_DEVICE" && success)' in activity
         and activity.find("if (acknowledged)") < activity.find("returnToSystemHome()")
     ),
-    "HOME resolver excludes CREDIXCEL itself": (
+    "HOME selection excludes CREDIXCEL and ResolverActivity": (
         "queryIntentActivities" in activity
-        and "it.activityInfo.packageName != packageName" in activity
+        and "info.packageName != packageName" in activity
+        and '!info.name.endsWith(".ResolverActivity")' in activity
     ),
-    "HOME return launches external activity then finishes CREDIXCEL": (
-        "startActivity(homeIntent)" in activity and "finish()" in activity
+    "HOME return explicitly launches selected system launcher": (
+        "component = android.content.ComponentName(launcher.packageName, launcher.name)" in activity
+        and "startActivity(explicitHome)" in activity
+        and "finish()" in activity
     ),
-    "release versionCode 35": "versionCode = 35" in gradle_lines,
-    "release versionName 1.3.4": 'versionName = "1.3.4"' in gradle_lines,
+    "release versionCode 36": "versionCode = 36" in gradle_lines,
+    "release versionName 1.3.5": 'versionName = "1.3.5"' in gradle_lines,
 }
 failed = [name for name, ok in checks.items() if not ok]
 for name, ok in checks.items():
