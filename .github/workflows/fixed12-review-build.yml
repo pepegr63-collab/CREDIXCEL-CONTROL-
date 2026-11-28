@@ -366,7 +366,7 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\\.credixcel\\.control' versionCode='36' versionName='1\\.3\\.5'"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com\\.credixcel\\.control' versionCode='37' versionName='1\\.3\\.6'"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload signed APK artifact
