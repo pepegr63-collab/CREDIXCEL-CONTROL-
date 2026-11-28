@@ -22,6 +22,7 @@ on:
       - 'scripts/fixed13-strict-kiosk.py'
       - 'scripts/fixed12-return-home-after-unlock.py'
       - 'scripts/fixed14-restore-system-home.py'
+      - 'scripts/fixed15-verified-unlock-home.py'
 
 permissions:
   contents: read
@@ -305,6 +306,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/fixed14-restore-system-home.py "$PROJECT_DIR"
+
+      - name: Correct verified UNLOCK cleanup and Android HOME selection (1.3.6)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/fixed15-verified-unlock-home.py "$PROJECT_DIR"
 
       - name: Verify authenticated recovery UNLOCK path
         shell: bash
