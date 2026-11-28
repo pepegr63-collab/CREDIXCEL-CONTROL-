@@ -54,8 +54,8 @@ checks = {
         and "startActivity(explicitHome)" in activity
         and "finish()" in activity
     ),
-    "release versionCode 36": "versionCode = 36" in gradle_lines,
-    "release versionName 1.3.5": 'versionName = "1.3.5"' in gradle_lines,
+    "release versionCode 37": "versionCode = 37" in gradle_lines,
+    "release versionName 1.3.6": 'versionName = "1.3.6"' in gradle_lines,
 }
 failed = [name for name, ok in checks.items() if not ok]
 for name, ok in checks.items():
